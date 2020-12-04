@@ -15,83 +15,44 @@ type passport struct {
 }
 
 func (p passport) valid() bool {
-	if byr, err := strconv.Atoi(p.Byr); err == nil {
-		if byr < 1920 || byr > 2002 {
-			log.Printf("Invalid byr: %q\n", p.Byr)
-			return false
-		}
-	} else {
-		log.Printf("Invalid byr: %q\n", p.Byr)
+	byr, err := strconv.Atoi(p.Byr)
+	if err != nil || byr < 1920 || byr > 2002 {
 		return false
 	}
 
-	if iyr, err := strconv.Atoi(p.Iyr); err == nil {
-		if iyr < 2010 || iyr > 2020 {
-			log.Printf("Invalid iyr: %q\n", p.Iyr)
-			return false
-		}
-	} else {
-		log.Printf("Invalid iyr: %q\n", p.Iyr)
+	iyr, err := strconv.Atoi(p.Iyr)
+	if err != nil || iyr < 2010 || iyr > 2020 {
 		return false
 	}
 
-	if eyr, err := strconv.Atoi(p.Eyr); err == nil {
-		if eyr < 2020 || eyr > 2030 {
-			log.Printf("Invalid eyr: %q\n", p.Eyr)
-			return false
-		}
-	} else {
-		log.Printf("Invalid eyr: %q\n", p.Eyr)
+	eyr, err := strconv.Atoi(p.Eyr)
+	if err != nil || eyr < 2020 || eyr > 2030 {
 		return false
 	}
 
 	var hgtInt int
-	if n, err := fmt.Sscanf(p.Hgt, "%dcm", &hgtInt); err == nil {
-		if n != 1 {
-			log.Println("hgt cm Sscanf parse failure")
-			return false
-		}
-
+	if _, err := fmt.Sscanf(p.Hgt, "%dcm", &hgtInt); err == nil {
 		if hgtInt < 150 || hgtInt > 193 {
-			log.Printf("Invalid hgt cm: %q\n", p.Hgt)
 			return false
 		}
 	} else if _, err := fmt.Sscanf(p.Hgt, "%din", &hgtInt); err == nil {
-		if n != 1 {
-			log.Println("hgt in Sscanf parse failure")
-			return false
-		}
-
 		if hgtInt < 59 || hgtInt > 76 {
-			log.Printf("Invalid hgt in: %q\n", p.Hgt)
 			return false
 		}
 	} else {
-		log.Printf("Invalid hgt: %q\n", p.Hgt)
 		return false
 	}
 
 	if matched, err := regexp.MatchString("^#[0-9a-f]{6}$", p.Hcl); !matched || err != nil {
-		log.Printf("Invalid hcl: %q\n", p.Hcl)
 		return false
 	}
 
-	validEcl := map[string]bool{
-		"amb": true,
-		"blu": true,
-		"brn": true,
-		"gry": true,
-		"grn": true,
-		"hzl": true,
-		"oth": true,
-	}
+	validEcl := map[string]int{"amb": 1, "blu": 1, "brn": 1, "gry": 1, "grn": 1, "hzl": 1, "oth": 1}
 	if _, ok := validEcl[p.Ecl]; !ok {
-		log.Printf("Invalid ecl: %q\n", p.Ecl)
 		return false
 	}
 
 	if matched, err := regexp.MatchString("^[0-9]{9}$", p.Pid); !matched || err != nil {
-		log.Printf("Invalid pid: %q\n", p.Pid)
 		return false
 	}
 
