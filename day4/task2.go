@@ -1,8 +1,8 @@
 package main
 
 import (
-	"bufio"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"os"
 	"regexp"
@@ -10,32 +10,30 @@ import (
 	"strings"
 )
 
-type passport struct {
-	Byr, Iyr, Eyr, Hgt, Hcl, Ecl, Pid, Cid string
-}
+type passport map[string]string
 
 func (p passport) valid() bool {
-	byr, err := strconv.Atoi(p.Byr)
+	byr, err := strconv.Atoi(p["byr"])
 	if err != nil || byr < 1920 || byr > 2002 {
 		return false
 	}
 
-	iyr, err := strconv.Atoi(p.Iyr)
+	iyr, err := strconv.Atoi(p["iyr"])
 	if err != nil || iyr < 2010 || iyr > 2020 {
 		return false
 	}
 
-	eyr, err := strconv.Atoi(p.Eyr)
+	eyr, err := strconv.Atoi(p["eyr"])
 	if err != nil || eyr < 2020 || eyr > 2030 {
 		return false
 	}
 
 	var hgtInt int
-	if _, err := fmt.Sscanf(p.Hgt, "%dcm", &hgtInt); err == nil {
+	if _, err := fmt.Sscanf(p["hgt"], "%dcm", &hgtInt); err == nil {
 		if hgtInt < 150 || hgtInt > 193 {
 			return false
 		}
-	} else if _, err := fmt.Sscanf(p.Hgt, "%din", &hgtInt); err == nil {
+	} else if _, err := fmt.Sscanf(p["hgt"], "%din", &hgtInt); err == nil {
 		if hgtInt < 59 || hgtInt > 76 {
 			return false
 		}
@@ -43,74 +41,50 @@ func (p passport) valid() bool {
 		return false
 	}
 
-	if matched, err := regexp.MatchString("^#[0-9a-f]{6}$", p.Hcl); !matched || err != nil {
+	if matched, err := regexp.MatchString("^#[0-9a-f]{6}$", p["hcl"]); !matched || err != nil {
 		return false
 	}
 
 	validEcl := map[string]int{"amb": 1, "blu": 1, "brn": 1, "gry": 1, "grn": 1, "hzl": 1, "oth": 1}
-	if _, ok := validEcl[p.Ecl]; !ok {
+	if _, ok := validEcl[p["ecl"]]; !ok {
 		return false
 	}
 
-	if matched, err := regexp.MatchString("^[0-9]{9}$", p.Pid); !matched || err != nil {
+	if matched, err := regexp.MatchString("^[0-9]{9}$", p["pid"]); !matched || err != nil {
 		return false
 	}
 
 	return true
 }
 
-func countValidPassports() int {
-	valid := 0
+func NewPassport(str string) passport {
+	var p passport = make(map[string]string)
 
-	var currentPassport *passport
-	scanner := bufio.NewScanner(os.Stdin)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if line == "" {
-			if currentPassport != nil {
-				if currentPassport.valid() {
-					valid++
-				}
-
-				currentPassport = nil
-			}
-			continue
-		}
-
-		if currentPassport == nil {
-			currentPassport = &passport{}
-		}
-
-		for _, entry := range strings.Split(line, " ") {
-			var field, value string
-			if _, err := fmt.Sscanf(entry, "%3s:%s", &field, &value); err == nil {
-				switch field {
-				case "byr":
-					currentPassport.Byr = value
-				case "iyr":
-					currentPassport.Iyr = value
-				case "eyr":
-					currentPassport.Eyr = value
-				case "hgt":
-					currentPassport.Hgt = value
-				case "hcl":
-					currentPassport.Hcl = value
-				case "ecl":
-					currentPassport.Ecl = value
-				case "pid":
-					currentPassport.Pid = value
-				case "cid":
-					currentPassport.Cid = value
-				default:
-					log.Fatalf("Invalid field: %s", field)
-				}
-			} else {
-				log.Fatalf("Parse error: %s", err.Error())
-			}
+	str = strings.Trim(str, "\n")
+	str = strings.ReplaceAll(str, "\n", " ")
+	for _, entry := range strings.Split(str, " ") {
+		var field, value string
+		if _, err := fmt.Sscanf(entry, "%3s:%s", &field, &value); err == nil {
+			p[field] = value
+		} else {
+			log.Fatalf("Parse error: %s", err.Error())
 		}
 	}
-	if currentPassport != nil {
-		if currentPassport.valid() {
+
+	return p
+}
+
+func countValidPassports() int {
+	b, err := ioutil.ReadAll(os.Stdin)
+	if err != nil {
+		log.Fatal(err)
+	}
+	sectionStrings := strings.Split(string(b), "\n\n")
+
+	valid := 0
+	for _, str := range sectionStrings {
+		passport := NewPassport(str)
+		if passport.valid() {
 			valid++
 		}
 	}
