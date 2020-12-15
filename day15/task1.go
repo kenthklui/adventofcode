@@ -39,28 +39,25 @@ func seed(input []string) ([]int, map[int]int) {
 	return nums, lastOccurence
 }
 
-func iterate(nums []int, lastOccurence map[int]int, target int) []int {
-	for len(nums) < target {
-		prevIndex := len(nums) - 1
-		prev := nums[prevIndex]
-
-		lastOccur, ok := lastOccurence[prev]
-
+func iterate(nums []int, lastOccurence map[int]int, target int) int {
+	prev := nums[len(nums)-1]
+	for i := len(nums); i < target; i++ {
 		var newNum int
-		if ok {
-			newNum = prevIndex - lastOccur
+
+		if lastOccur, ok := lastOccurence[prev]; ok {
+			newNum = i - 1 - lastOccur
 		}
 
-		lastOccurence[prev] = prevIndex
-		nums = append(nums, newNum)
+		lastOccurence[prev] = i - 1
+		prev = newNum
 	}
 
-	return nums
+	return prev
 }
 
 func main() {
 	input := readInput()
 	nums, lastOccurence := seed(input)
-	nums = iterate(nums, lastOccurence, 2020)
-	fmt.Println(nums[len(nums)-1])
+	num := iterate(nums, lastOccurence, 2020)
+	fmt.Println(num)
 }
