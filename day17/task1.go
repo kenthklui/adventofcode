@@ -119,9 +119,9 @@ func (c *cube) String() string {
 }
 
 func newCube(initState [][]int, expectedCycles int) *cube {
-	xDim := len(initState) + (expectedCycles * 4)
-	yDim := len(initState[0]) + (expectedCycles * 4)
-	zDim := 1 + (expectedCycles * 4)
+	xDim := len(initState) + (expectedCycles * 2)
+	yDim := len(initState[0]) + (expectedCycles * 2)
+	zDim := 1 + (expectedCycles * 2)
 
 	c := make(cube, zDim)
 	for k := 0; k < len(c); k++ {
