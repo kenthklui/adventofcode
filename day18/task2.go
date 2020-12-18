@@ -24,52 +24,35 @@ func readInput() []string {
 }
 
 func solveBasic(line string) int {
-	tokens := strings.Split(line, " ")
-	value, err := strconv.Atoi(tokens[0])
-	if err != nil {
-		panic(err)
+	re := regexp.MustCompile(`([0-9]+) \+ ([0-9]+)`)
+	for m := re.FindStringSubmatch(line); m != nil; m = re.FindStringSubmatch(line) {
+		first, _ := strconv.Atoi(m[1])
+		second, _ := strconv.Atoi(m[2])
+		strValue := strconv.Itoa(first + second)
+		line = strings.Replace(line, m[0], strValue, 1)
 	}
-
-	for i := 1; i < len(tokens); i += 2 {
-		nextValue, err := strconv.Atoi(tokens[i+1])
-		if err != nil {
-			panic(err)
-		}
-
-		switch tokens[i] {
-		case "+":
-			value += nextValue
-		case "*":
-			value *= nextValue
-		default:
-			panic("Invalid token")
-		}
+	re = regexp.MustCompile(`([0-9]+) \* ([0-9]+)`)
+	for m := re.FindStringSubmatch(line); m != nil; m = re.FindStringSubmatch(line) {
+		first, _ := strconv.Atoi(m[1])
+		second, _ := strconv.Atoi(m[2])
+		strValue := strconv.Itoa(first * second)
+		line = strings.Replace(line, m[0], strValue, 1)
 	}
+	value, _ := strconv.Atoi(line)
 
 	return value
 }
 
+func solveBasicStr(line string) string {
+	line = strings.TrimPrefix(line, "(")
+	line = strings.TrimSuffix(line, ")")
+	return strconv.Itoa(solveBasic(line))
+}
+
 func solveLine(line string) int {
-	bracketRegex := regexp.MustCompile(`\([^\(\)]+\)`)
-	for strings.Index(line, "(") != -1 {
-		newLine := line
-		submatches := bracketRegex.FindAllStringSubmatchIndex(line, -1)
-
-		for _, match := range submatches {
-			exp := line[match[0]+1 : match[1]-1]
-			strValue := strconv.Itoa(solveLine(exp))
-			newLine = strings.ReplaceAll(newLine, line[match[0]:match[1]], strValue)
-		}
-
-		line = newLine
-	}
-
-	addRegex := regexp.MustCompile(`[0-9]+ \+ [0-9]+`)
-	for strings.Index(line, "+") != -1 {
-		submatch := addRegex.FindString(line)
-
-		strValue := strconv.Itoa(solveBasic(submatch))
-		line = strings.Replace(line, submatch, strValue, 1)
+	re := regexp.MustCompile(`\(([^\(\)]+)\)`)
+	for re.MatchString(line) {
+		line = re.ReplaceAllStringFunc(line, solveBasicStr)
 	}
 
 	return solveBasic(line)

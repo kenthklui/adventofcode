@@ -23,44 +23,38 @@ func readInput() []string {
 	return lines
 }
 
-func solveLine(line string) int {
-	bracketRegex := regexp.MustCompile(`\([^\(\)]+\)`)
-	for strings.Index(line, "(") != -1 {
-		newLine := line
-		submatches := bracketRegex.FindAllStringSubmatchIndex(line, -1)
-
-		for _, match := range submatches {
-			exp := line[match[0]+1 : match[1]-1]
-			strValue := strconv.Itoa(solveLine(exp))
-			newLine = strings.ReplaceAll(newLine, line[match[0]:match[1]], strValue)
-		}
-
-		line = newLine
-	}
-
+func solveBasic(line string) int {
 	tokens := strings.Split(line, " ")
-	value, err := strconv.Atoi(tokens[0])
-	if err != nil {
-		panic(err)
-	}
-
+	value, _ := strconv.Atoi(tokens[0])
 	for i := 1; i < len(tokens); i += 2 {
-		nextValue, err := strconv.Atoi(tokens[i+1])
-		if err != nil {
+		if nextValue, err := strconv.Atoi(tokens[i+1]); err == nil {
+			switch tokens[i] {
+			case "+":
+				value += nextValue
+			case "*":
+				value *= nextValue
+			}
+		} else {
 			panic(err)
-		}
-
-		switch tokens[i] {
-		case "+":
-			value += nextValue
-		case "*":
-			value *= nextValue
-		default:
-			panic("Invalid token")
 		}
 	}
 
 	return value
+}
+
+func solveBasicStr(line string) string {
+	line = strings.TrimPrefix(line, "(")
+	line = strings.TrimSuffix(line, ")")
+	return strconv.Itoa(solveBasic(line))
+}
+
+func solveLine(line string) int {
+	re := regexp.MustCompile(`\(([^\(\)]+)\)`)
+	for re.MatchString(line) {
+		line = re.ReplaceAllStringFunc(line, solveBasicStr)
+	}
+
+	return solveBasic(line)
 }
 
 func main() {
