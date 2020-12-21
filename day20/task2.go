@@ -438,9 +438,12 @@ func stitchCanvas(s solution, ts tiles) canvas {
 	return canvas{string(data), width}
 }
 
+func monsterStr() string {
+	return "                  # \n#    ##    ##    ###\n #  #  #  #  #  #   "
+}
+
 func getMonster(rotate, canvasWidth int) [][]int {
-	monsterStr := "                  # \n#    ##    ##    ###\n #  #  #  #  #  #   "
-	monsterLines := strings.Split(monsterStr, "\n")
+	monsterLines := strings.Split(monsterStr(), "\n")
 
 	switch rotate {
 	case 0:
@@ -528,7 +531,7 @@ func main() {
 	// fmt.Println(c)
 
 	count := countMonsters(c)
-	// monster has 15 #'s - let's assume no monsters overlap in the ocean
 
-	fmt.Println(strings.Count(c.Data, "#") - 15*count)
+	// Let's assume no monsters overlap in the ocean
+	fmt.Println(strings.Count(c.Data, "#") - strings.Count(monsterStr(), "#")*count)
 }
