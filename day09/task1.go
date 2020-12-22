@@ -17,6 +17,18 @@ type combo struct {
 	FirstIndex, SecondIndex int
 }
 
+func readPreambleSize() (int, error) {
+	if len(os.Args) < 2 {
+		return 0, fmt.Errorf("Usage: day8 <preambleSize> < input.txt")
+	}
+
+	var preambleSize int
+	if _, err := fmt.Sscanf(os.Args[1], "%d", &preambleSize); err != nil {
+		return 0, fmt.Errorf("Failed to parse preamble size: %q, reason: %q", os.Args[1], err.Error())
+	}
+	return preambleSize, nil
+}
+
 func readValues() []int {
 	values := make([]int, 0)
 
@@ -73,11 +85,8 @@ func checkXmas(preambleSize int) (int, error) {
 }
 
 func main() {
-	var preambleSize int
-	n, err := fmt.Sscanf(os.Args[1], "%d", &preambleSize)
-	if err != nil || n != 1 {
-		log.Fatal("Failed to parse preamble size: %q", os.Args[1])
-	}
+	preambleSize, err := readPreambleSize()
+	failOnErr(err)
 
 	value, err := checkXmas(preambleSize)
 	failOnErr(err)
