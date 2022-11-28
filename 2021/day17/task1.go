@@ -3,65 +3,110 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"math"
 	"os"
 )
 
 // Assume box is below origin (ie. yMax < 0)
 // Highest height is achieved with min X velocity + max y velocity
 
-// For y:
-// Any positive y velocity returns to 0 after 2y+1 steps, at which velocity is -y-1
-// Max y is therefore bound by (-y-1) >= yMin --> y <= -yMin-1
-
 type box struct {
 	xMin, xMax, yMin, yMax int
 }
 
-func possibleSteps(b box) map[int]int {
-	// First set a minimum for vX
-	minVX, x := 0, 0
-	for x <= b.xMax {
-		minVX++
-		x += minVX
+// Assume positive x box
+func possibleVXs(b box, yStepMap map[int][]int) map[int][]int {
+	stepMap := make(map[int][]int)
 
-		// Trivial case - does the minimum vX let us stop in the box?
-		// If yes, return -1 for a later shortcut
-		if x >= b.xMin {
-			return map[int]int{-1: -1}
+	// min X velocity is achieved when vX(vX+1)/2 == xMin
+	minVX := int(math.Ceil(math.Sqrt(float64(b.xMin)*2.0+0.25) - 0.5))
+	// max X velocity is achieved when you hit xMax in 1 step
+	maxVX := b.xMax
+
+	maxSteps := 0
+	for step := range yStepMap {
+		if step > maxSteps {
+			maxSteps = step
 		}
 	}
 
-	possibleSteps := make(map[int]int)
-	for vX := minVX; vX <= b.xMin; vX++ {
-		x = 0
-		steps := 0
-		for currVX := vX; currVX >= 0; currVX-- {
-			steps++
+	for vX := maxVX; vX >= minVX; vX-- {
+		x := 0
+		currVX := vX
+
+		for steps := 1; steps <= maxSteps; steps++ {
 			x += currVX
 
 			if x > b.xMax {
 				break
-			} else if b.xMin <= x {
-				possibleSteps[steps] = steps
+			}
+
+			if x >= b.xMin {
+				if _, ok := yStepMap[steps]; !ok {
+					continue
+				}
+
+				if stepList, ok := stepMap[steps]; ok {
+					stepMap[steps] = append(stepList, vX)
+				} else {
+					stepMap[steps] = []int{vX}
+				}
+			}
+
+			if currVX > 0 {
+				currVX--
 			}
 		}
 	}
 
-	return possibleSteps
+	return stepMap
 }
 
-func calculateMaxY(b box, steps map[int]int) int {
-	// Start iteration from maximum possible Y velocity
-	vYMax := -b.yMin - 1
-	// Check trivial case first - if X will let us land in the box, we can just use vYMax
-	if _, ok := steps[-1]; ok {
-		return vYMax
+// Assume negative y box
+func possibleVYs(b box) map[int][]int {
+	stepMap := make(map[int][]int)
+
+	// First constrain by y box
+	minVY := b.yMin
+	maxVY := -b.yMin - 1
+
+	for vY := maxVY; vY >= minVY; vY-- {
+		y := 0
+		steps := 0
+
+		for currVY := vY; currVY >= minVY; currVY-- {
+			steps++
+			y += currVY
+
+			if y < b.yMin {
+				break
+			}
+
+			if y <= b.yMax {
+				if stepList, ok := stepMap[steps]; ok {
+					stepMap[steps] = append(stepList, vY)
+				} else {
+					stepMap[steps] = []int{vY}
+				}
+			}
+		}
 	}
 
-	// Original plan was to iterate downward from vYMax...
-	// Turns out none of the rest was needed, because input fit the trivial case!
-	// I guess I'll flesh this out another time
-	return 0
+	return stepMap
+}
+
+func findMaxHeight(xStepMap, yStepMap map[int][]int) int {
+	maxVY := 0
+
+	for step := range xStepMap {
+		if yVelocities, ok := yStepMap[step]; ok {
+			if yVelocities[0] > maxVY {
+				maxVY = yVelocities[0]
+			}
+		}
+	}
+
+	return maxVY * (maxVY + 1) / 2
 }
 
 func readInput() []string {
@@ -96,8 +141,9 @@ func parseInput(input []string) box {
 func main() {
 	input := readInput()
 	b := parseInput(input)
-	steps := possibleSteps(b)
-	vYMax := calculateMaxY(b, steps)
 
-	fmt.Println(vYMax * (vYMax + 1) / 2)
+	yStepMap := possibleVYs(b)
+	xStepMap := possibleVXs(b, yStepMap)
+
+	fmt.Println(findMaxHeight(xStepMap, yStepMap))
 }
