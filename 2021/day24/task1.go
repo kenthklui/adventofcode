@@ -8,131 +8,170 @@ import (
 	"strings"
 )
 
-type instruction struct {
-	command, variable, param string
-}
-
-type ALUProgram struct {
-	instructions []instruction
-	// At the start of next program, a variable is overwritten with inp
-	// Store this for deduplication purposes
-	overwriteVariable string
-}
-
-func NewALUProgram(inpVar string) *ALUProgram {
-	ins := instruction{command: "inp", variable: inpVar}
-	ap := ALUProgram{[]instruction{ins}, ""}
-	return &ap
-}
-
-func (ap *ALUProgram) addInstruction(s []string) {
-	ap.instructions = append(ap.instructions, instruction{s[0], s[1], s[2]})
-}
-
-type ALU struct {
-	w, x, y, z int
-}
-
-func NewALU() *ALU { return &ALU{} }
-
-func (alu *ALU) makeCopy() *ALU {
-	return &ALU{alu.w, alu.x, alu.y, alu.z}
-}
-
-func (alu *ALU) getVar(s string) *int {
+func getALUIndex(s string) int {
 	switch s {
 	case "w":
-		return &alu.w
+		return 0
 	case "x":
-		return &alu.x
+		return 1
 	case "y":
-		return &alu.y
+		return 2
 	case "z":
-		return &alu.z
+		return 3
 	default:
 		err := fmt.Errorf("Invalid variable \"%s\"", s)
 		panic(err)
 	}
 }
 
-func (alu *ALU) get(s string) *int {
-	i, err := strconv.Atoi(s)
-	if err == nil {
-		return &i
-	} else {
-		return alu.getVar(s)
-	}
+type instruction struct {
+	command         func(*ALU, int, int)
+	variable, param int
 }
 
-func (alu *ALU) execute(ap *ALUProgram, inp uint8) {
-	for _, ins := range ap.instructions {
-		v := alu.getVar(ins.variable)
+func NewInstruction(s []string) instruction {
+	varIndex := getALUIndex(s[1])
+	if len(s) == 2 { // inp
+		return instruction{inpVariable, varIndex, 0}
+	}
 
-		if ins.command == "inp" {
-			*v = int(inp)
-			continue
-		}
-
-		p := alu.get(ins.param)
-		switch ins.command {
+	if param, err := strconv.Atoi(s[2]); err == nil {
+		switch s[0] {
 		case "add":
-			*v += *p
+			return instruction{addValue, varIndex, param}
 		case "mul":
-			*v *= *p
+			return instruction{mulValue, varIndex, param}
 		case "div":
-			/*
-				if *p == 0 {
-					panic("div by 0")
-				}
-			*/
-			*v /= *p
+			return instruction{divValue, varIndex, param}
 		case "mod":
-			/*
-				if *v < 0 {
-					panic("mod negative")
-				} else if *p <= 0 {
-					panic("mod by non-positive")
-				}
-			*/
-			*v %= *p
+			return instruction{modValue, varIndex, param}
 		case "eql":
-			if *v == *p {
-				*v = 1
-			} else {
-				*v = 0
-			}
+			return instruction{eqlValue, varIndex, param}
+		default:
+			panic("invalid ALU instruction")
+		}
+	} else {
+		paramIndex := getALUIndex(s[2])
+		switch s[0] {
+		case "add":
+			return instruction{addVariable, varIndex, paramIndex}
+		case "mul":
+			return instruction{mulVariable, varIndex, paramIndex}
+		case "div":
+			return instruction{divVariable, varIndex, paramIndex}
+		case "mod":
+			return instruction{modVariable, varIndex, paramIndex}
+		case "eql":
+			return instruction{eqlVariable, varIndex, paramIndex}
 		default:
 			panic("invalid ALU instruction")
 		}
 	}
 }
 
+type ALUProgram struct {
+	instructions []instruction
+	// At the start of next program, a variable is overwritten with inp
+	// Store this for deduplication purposes
+	overwriteIndex int
+}
+
+func NewALUProgram() *ALUProgram {
+	return &ALUProgram{[]instruction{}, -1}
+}
+
+func (ap *ALUProgram) addInstruction(s []string) {
+	ap.instructions = append(ap.instructions, NewInstruction(s))
+}
+
+type ALU struct {
+	val []int
+}
+
+func NewALU() *ALU { return &ALU{[]int{0, 0, 0, 0}} }
+func (alu *ALU) makeCopy() *ALU {
+	aluCopy := ALU{make([]int, len(alu.val))}
+	copy(aluCopy.val, alu.val)
+	return &aluCopy
+}
+
+func inpVariable(alu *ALU, varIndex, param int)      { alu.val[varIndex] = param }
+func addVariable(alu *ALU, varIndex, paramIndex int) { alu.val[varIndex] += alu.val[paramIndex] }
+func addValue(alu *ALU, varIndex, param int)         { alu.val[varIndex] += param }
+func mulVariable(alu *ALU, varIndex, paramIndex int) { alu.val[varIndex] *= alu.val[paramIndex] }
+func mulValue(alu *ALU, varIndex, param int)         { alu.val[varIndex] *= param }
+func divVariable(alu *ALU, varIndex, paramIndex int) { alu.val[varIndex] /= alu.val[paramIndex] }
+func divValue(alu *ALU, varIndex, param int)         { alu.val[varIndex] /= param }
+func modVariable(alu *ALU, varIndex, paramIndex int) { alu.val[varIndex] %= alu.val[paramIndex] }
+func modValue(alu *ALU, varIndex, param int)         { alu.val[varIndex] %= param }
+func eqlVariable(alu *ALU, varIndex, paramIndex int) {
+	if alu.val[varIndex] == alu.val[paramIndex] {
+		alu.val[varIndex] = 1
+	} else {
+		alu.val[varIndex] = 0
+	}
+}
+func eqlValue(alu *ALU, varIndex, param int) {
+	if alu.val[varIndex] == param {
+		alu.val[varIndex] = 1
+	} else {
+		alu.val[varIndex] = 0
+	}
+}
+
+func (alu *ALU) execute(ap *ALUProgram, inp int) {
+	inpIns := ap.instructions[0]
+	inpIns.command(alu, inpIns.variable, inp)
+
+	for _, ins := range ap.instructions[1:] {
+		ins.command(alu, ins.variable, ins.param)
+	}
+}
+
+type ALUState struct {
+	w, x, y, z int
+}
+
+func (alu *ALU) state(overwriteIndex int) ALUState {
+	if overwriteIndex == -1 {
+		return ALUState{alu.val[0], alu.val[1], alu.val[2], alu.val[3]}
+	}
+
+	var temp int
+
+	alu.val[overwriteIndex], temp = temp, alu.val[overwriteIndex]
+	als := ALUState{alu.val[0], alu.val[1], alu.val[2], alu.val[3]}
+	alu.val[overwriteIndex], temp = temp, alu.val[overwriteIndex]
+
+	return als
+}
+
 var empty struct{}
 
 type Memoizer struct {
-	cache []map[ALU]struct{}
+	cache []map[ALUState]struct{}
 }
 
 func NewMemoizer(length int) *Memoizer {
-	cache := make([]map[ALU]struct{}, length)
+	cache := make([]map[ALUState]struct{}, length)
 	for i := range cache {
-		cache[i] = make(map[ALU]struct{})
+		cache[i] = make(map[ALUState]struct{})
 	}
 
 	return &Memoizer{cache}
 }
 
-func (m *Memoizer) check(step int, alu *ALU) bool {
-	_, ok := m.cache[step][*alu]
+func (m *Memoizer) check(step int, als ALUState) bool {
+	_, ok := m.cache[step][als]
 	return ok
 }
 
 // Set something as a dead end
-func (m *Memoizer) kill(step int, alu *ALU) {
-	m.cache[step][*alu] = empty
+func (m *Memoizer) kill(step int, als ALUState) {
+	m.cache[step][als] = empty
 }
 
-func numString(digits []uint8) string {
+func numString(digits []int) string {
 	var b strings.Builder
 	for _, d := range digits {
 		b.WriteRune(rune('0' + d))
@@ -140,48 +179,58 @@ func numString(digits []uint8) string {
 	return b.String()
 }
 
-func findModelNum(aps []*ALUProgram) string {
-	memoizer := NewMemoizer(len(aps))
+type modelNumFinder struct {
+	aps        []*ALUProgram
+	memoizer   *Memoizer
+	completion int
+}
 
-	alu := NewALU()
-	success, digits := recursiveFindModelNum(aps, memoizer, alu, 0)
-	if success {
-		return numString(digits)
-	} else {
-		return "Failed to find model number"
+func NewModelNumFinder(aps []*ALUProgram) *modelNumFinder {
+	return &modelNumFinder{
+		aps:        aps,
+		memoizer:   NewMemoizer(len(aps)),
+		completion: 0,
 	}
 }
 
-func recursiveFindModelNum(aps []*ALUProgram, memoizer *Memoizer, alu *ALU, step int) (bool, []uint8) {
-	if step == len(aps) {
-		if alu.z == 0 {
-			return true, []uint8{}
+func (mnf *modelNumFinder) find() (string, error) {
+	success, digits := mnf.recursiveFind(NewALU(), 0)
+	if success {
+		return numString(digits), nil
+	} else {
+		return "", fmt.Errorf("Failed to find model number")
+	}
+}
+
+func (mnf *modelNumFinder) recursiveFind(alu *ALU, step int) (bool, []int) {
+	if step == len(mnf.aps) {
+		if alu.val[3] == 0 {
+			return true, []int{}
 		} else {
 			return false, nil
 		}
 	}
 
-	checkAlu := alu.makeCopy()
-	if aps[step].overwriteVariable != "" {
-		overwriteVar := checkAlu.getVar(aps[step].overwriteVariable)
-		*overwriteVar = 0
-	}
-
-	if memoizer.check(step, checkAlu) {
+	als := alu.state(mnf.aps[step].overwriteIndex)
+	if mnf.memoizer.check(step, als) {
 		return false, nil
 	}
 
-	for nextDigit := uint8(9); nextDigit > 0; nextDigit-- {
+	for nextDigit := 9; nextDigit > 0; nextDigit-- {
 		nextAlu := alu.makeCopy()
-		nextAlu.execute(aps[step], nextDigit)
+		nextAlu.execute(mnf.aps[step], nextDigit)
 
-		success, digits := recursiveFindModelNum(aps, memoizer, nextAlu, step+1)
-		if success {
-			return true, append([]uint8{nextDigit}, digits...)
+		if success, digits := mnf.recursiveFind(nextAlu, step+1); success {
+			return true, append([]int{nextDigit}, digits...)
 		}
 	}
 
-	memoizer.kill(step, checkAlu)
+	mnf.memoizer.kill(step, als)
+
+	if step == 2 {
+		mnf.completion++
+		// fmt.Printf("Finished searching %d%% of search space\n", mnf.completion)
+	}
 
 	return false, nil
 }
@@ -209,14 +258,14 @@ func parseInput(input []string) []*ALUProgram {
 		splits := strings.Split(line, " ")
 		if splits[0] == "inp" {
 			if ap != nil {
-				ap.overwriteVariable = splits[1]
+				ap.overwriteIndex = getALUIndex(splits[1])
 			}
 
-			ap = NewALUProgram(splits[1])
+			ap = NewALUProgram()
 			aps = append(aps, ap)
-		} else {
-			ap.addInstruction(splits)
 		}
+
+		ap.addInstruction(splits)
 	}
 
 	return aps
@@ -226,6 +275,10 @@ func main() {
 	input := readInput()
 	aps := parseInput(input)
 
-	modelNum := findModelNum(aps)
-	fmt.Println(modelNum)
+	finder := NewModelNumFinder(aps)
+	if result, err := finder.find(); err == nil {
+		fmt.Println(result)
+	} else {
+		fmt.Println(err.Error())
+	}
 }
