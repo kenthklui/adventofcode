@@ -17,13 +17,12 @@ type vec3 struct {
 }
 type vec3s []*vec3
 
-func NewVec3(x, y, z int) *vec3                  { return &vec3{x, y, z, nil} }
-func (v *vec3) String() string                   { return fmt.Sprintf("[%d,%d,%d]", v.x, v.y, v.z) }
-func (v *vec3) equals(u *vec3) bool              { return v.x == u.x && v.y == u.y && v.z == u.z }
-func (v *vec3) negate() *vec3                    { return NewVec3(-v.x, -v.y, -v.z) }
-func (v *vec3) translate(u *vec3) *vec3          { return NewVec3(v.x+u.x, v.y+u.y, v.z+u.z) }
-func (v *vec3) rotate(rot int) *vec3             { return v.rotations()[rot] }
-func (v *vec3) transform(rot int, t *vec3) *vec3 { return v.rotate(rot).translate(t) }
+func NewVec3(x, y, z int) *vec3      { return &vec3{x, y, z, nil} }
+func (v *vec3) String() string       { return fmt.Sprintf("[%d,%d,%d]", v.x, v.y, v.z) }
+func (v *vec3) equals(u *vec3) bool  { return v.x == u.x && v.y == u.y && v.z == u.z }
+func (v *vec3) add(u *vec3) *vec3    { return NewVec3(v.x+u.x, v.y+u.y, v.z+u.z) }
+func (v *vec3) sub(u *vec3) *vec3    { return NewVec3(v.x-u.x, v.y-u.y, v.z-u.z) }
+func (v *vec3) rotate(rot int) *vec3 { return v.rotations()[rot] }
 
 // https://stackoverflow.com/a/16467849
 func (v *vec3) turn() *vec3 { return NewVec3(-v.y, v.x, v.z) }
@@ -62,7 +61,7 @@ func vec3Less(u, v *vec3) bool {
 }
 
 func manhattan(u, v *vec3) int {
-	w := u.translate(v.negate())
+	w := u.sub(v)
 	m := 0
 	if w.x > 0 {
 		m += w.x
@@ -89,19 +88,20 @@ func (v3s vec3s) Swap(i, j int)      { v3s[i], v3s[j] = v3s[j], v3s[i] }
 func (v3s vec3s) Less(i, j int) bool { return vec3Less(v3s[i], v3s[j]) }
 
 type scanner struct {
-	beacons vec3s
+	beacons    vec3s
+	normalized vec3s
 
-	translation *vec3
-	rotation    int
-	normalized  vec3s
+	index    int
+	position *vec3
+	rotation int
 }
 
-func NewScanner() *scanner { return &scanner{beacons: make(vec3s, 0)} }
+func NewScanner(index int) *scanner { return &scanner{index: index, beacons: make(vec3s, 0)} }
 func (s *scanner) String() string {
-	if s.translation == nil {
+	if s.position == nil {
 		return "[]"
 	} else {
-		return fmt.Sprintf("[%s : Rotation %d]", s.translation, s.rotation)
+		return fmt.Sprintf("[%s : Rotation %d]", s.position, s.rotation)
 	}
 }
 func (s *scanner) addBeacon(x, y, z int) {
@@ -113,25 +113,20 @@ func (s *scanner) rotatedBeacons(rot int) vec3s {
 	for _, b := range s.beacons {
 		rotated = append(rotated, b.rotate(rot))
 	}
-	// fmt.Printf("\nRotation %d:\n%s\nto\n%s\n", rot, s.beacons, rotated)
 	return rotated
 }
 
-func (s *scanner) transformedBeacons(rotation int, translation *vec3) vec3s {
-	transformed := make(vec3s, 0, len(s.beacons))
-	for _, b := range s.beacons {
-		transformed = append(transformed, b.transform(rotation, translation))
-	}
-	return transformed
-}
-
 func (s *scanner) normalizedBeacons() vec3s {
-	if s.translation == nil {
+	if s.position == nil {
 		panic("Cannot produce normalized beacons yet")
 	}
 
 	if s.normalized == nil {
-		s.normalized = s.transformedBeacons(s.rotation, s.translation)
+		s.normalized = make(vec3s, 0, len(s.beacons))
+		for _, b := range s.beacons {
+			bTransform := b.rotate(s.rotation).add(s.position)
+			s.normalized = append(s.normalized, bTransform)
+		}
 	}
 
 	return s.normalized
@@ -148,7 +143,7 @@ func (s *scanner) findBeacon(tar *vec3) int {
 }
 
 func (s *scanner) checkInRange(beacon *vec3) bool {
-	dist := s.translation.translate(beacon.negate())
+	dist := s.position.sub(beacon)
 	threshold := 1000
 	threshSq := threshold * threshold
 
@@ -160,31 +155,46 @@ func (s *scanner) checkInRange(beacon *vec3) bool {
 }
 
 func matchScanners(s1, s2 *scanner) bool {
-	if s1.translation == nil || s2.translation != nil {
-		return false
+	if s1.position == nil {
+		panic(fmt.Errorf("Matching unsolved %d against %d", s1.index, s2.index))
+	} else if s2.position != nil {
+		panic(fmt.Errorf("Matching %d against solved %d", s1.index, s2.index))
 	}
 
-	for rotation := 0; rotation < 24; rotation++ {
-		rotated := s2.rotatedBeacons(rotation)
+	matchThreshold := 12
 
-		for i := range s1.normalizedBeacons() {
-			for j, b2 := range rotated {
-				s2pos := locateScanner(s1, i, b2)
+	for rotation := 0; rotation < 24; rotation++ {
+		s2rotated := s2.rotatedBeacons(rotation)
+
+		for _, b1 := range s1.normalizedBeacons() {
+			for j, b2 := range s2rotated {
+				s2pos := b1.sub(b2)
 
 				matchedBeacons := 1
-				for k, tb := range rotated {
+				for k, tb := range s2rotated {
 					if j == k {
 						continue
 					}
 
-					tb = tb.translate(s2pos)
-					if s1.checkInRange(tb) && (s1.findBeacon(tb) != -1) {
-						matchedBeacons++
+					remainingBeacons := len(s2rotated) - k
+					if remainingBeacons+matchedBeacons < matchThreshold {
+						// Insufficient remaining beacons to reach threshold; failed match
+						break
+					}
+
+					tb = tb.add(s2pos)
+					if s1.checkInRange(tb) {
+						if s1.findBeacon(tb) != -1 {
+							matchedBeacons++
+						} else {
+							// Failure to detect beacon in range implies failed match
+							break
+						}
 					}
 				}
 
-				if matchedBeacons >= 12 {
-					s2.translation = s2pos
+				if matchedBeacons >= matchThreshold {
+					s2.position = s2pos
 					s2.rotation = rotation
 					return true
 				}
@@ -195,49 +205,43 @@ func matchScanners(s1, s2 *scanner) bool {
 	return false
 }
 
-func locateScanner(s1 *scanner, beaconIndex int, b2 *vec3) *vec3 {
-	b1 := s1.normalizedBeacons()[beaconIndex]
-	s2pos := b1.translate(b2.negate())
-
-	return s2pos
-}
-
 func mapScanners(scanners []*scanner) {
-	solvedScanners := 1
+	solvedCount := 1
 
-	for solvedScanners < len(scanners) {
-		for i, s1 := range scanners {
-			for j, s2 := range scanners {
-				if i == j {
-					continue
-				}
+	for _, solver := range scanners {
+		success := 0
 
-				if matchScanners(s1, s2) {
-					solvedScanners++
-				}
+		unsolved := scanners[solvedCount:]
+		for j, toSolve := range unsolved {
+			if matchScanners(solver, toSolve) {
+				// Swap solved scanners to front
+				unsolved[j], unsolved[success] = unsolved[success], unsolved[j]
+				success++
 			}
 		}
+
+		solvedCount += success
 	}
 }
 
 func listBeacons(scanners []*scanner) vec3s {
-	all := make(vec3s, 0)
+	deduped := make(vec3s, 0)
 	for _, s := range scanners {
-		all = append(all, s.normalizedBeacons()...)
+		deduped = append(deduped, s.normalizedBeacons()...)
 	}
-	sort.Sort(all)
+	sort.Sort(deduped)
 
-	deduped := make(vec3s, 1)
-	deduped[0] = all[0]
-	for _, v := range all[1:] {
-		if deduped[len(deduped)-1].equals(v) {
+	count := 1
+	for _, v := range deduped[1:] {
+		if deduped[count-1].equals(v) {
 			continue
 		} else {
-			deduped = append(deduped, v)
+			deduped[count] = v
+			count++
 		}
 	}
 
-	return deduped
+	return deduped[:count]
 }
 
 func maxManhattan(scanners []*scanner) int {
@@ -248,7 +252,7 @@ func maxManhattan(scanners []*scanner) int {
 				continue
 			}
 
-			m := manhattan(s1.translation, s2.translation)
+			m := manhattan(s1.position, s2.position)
 			if m > max {
 				max = m
 			}
@@ -283,7 +287,7 @@ func parseInput(input []string) []*scanner {
 			scanners = append(scanners, s)
 			s = nil
 		} else if strings.Contains(line, "---") {
-			s = NewScanner()
+			s = NewScanner(len(scanners))
 		} else {
 			n, err := fmt.Sscanf(line, "%d,%d,%d", &x, &y, &z)
 			if err != nil {
@@ -300,7 +304,7 @@ func parseInput(input []string) []*scanner {
 	}
 
 	// Set origin and default alignment using first scanner
-	scanners[0].translation = NewVec3(0, 0, 0)
+	scanners[0].position = NewVec3(0, 0, 0)
 	scanners[0].rotation = 11
 
 	return scanners
