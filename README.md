@@ -1,4 +1,4 @@
-# adventofcode2020
+# adventofcode
 Sample solutions to Advent of Code.
 
 Solution for each task is nested in the respective year folder, followed by the day folder and filename. All solutions (with minor exceptions) are executable independently and read input from STDIN, ie.
