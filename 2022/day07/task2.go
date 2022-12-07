@@ -8,56 +8,46 @@ import (
 	"strings"
 )
 
-type obj interface {
-	name() string
-	size() int
-	isDir() bool
-	parent() *dir
-}
-
 type dir struct {
-	nameStr   string
-	parentDir *dir
-	children  map[string]obj
+	name           string
+	parent         *dir
+	subdirectories map[string]*dir
+	files          map[string]*file
 }
 
-func NewDir(nameStr string, parentDir *dir) *dir {
+func NewDir(name string, parent *dir) *dir {
 	return &dir{
-		nameStr:   nameStr,
-		parentDir: parentDir,
-		children:  make(map[string]obj),
+		name:           name,
+		parent:         parent,
+		subdirectories: make(map[string]*dir),
+		files:          make(map[string]*file),
 	}
 }
 
-func (d *dir) name() string { return d.nameStr }
 func (d *dir) size() int {
 	sum := 0
-	for _, o := range d.children {
-		sum += o.size()
+	for _, subdir := range d.subdirectories {
+		sum += subdir.size()
+	}
+	for _, file := range d.files {
+		sum += file.size
 	}
 	return sum
 }
-func (d *dir) isDir() bool  { return true }
-func (d *dir) parent() *dir { return d.parentDir }
 
 type file struct {
-	nameStr   string
-	parentDir *dir
-	bytes     int
+	name   string
+	parent *dir
+	size   int
 }
 
-func NewFile(nameStr string, parentDir *dir, size int) *file {
+func NewFile(name string, parent *dir, size int) *file {
 	return &file{
-		nameStr:   nameStr,
-		parentDir: parentDir,
-		bytes:     size,
+		name:   name,
+		parent: parent,
+		size:   size,
 	}
 }
-
-func (f *file) name() string { return f.nameStr }
-func (f *file) size() int    { return f.bytes }
-func (f *file) isDir() bool  { return false }
-func (f *file) parent() *dir { return f.parentDir }
 
 func readInput() []string {
 	lines := make([]string, 0)
@@ -80,13 +70,10 @@ func findClosestAbove(currDir *dir, sizeThreshold int) int {
 	if currSize >= sizeThreshold {
 		closest = currSize
 	}
-	for _, o := range currDir.children {
-		if o.isDir() {
-			d := o.(*dir)
-			childClosest := findClosestAbove(d, sizeThreshold)
-			if childClosest > 0 && childClosest < closest {
-				closest = childClosest
-			}
+	for _, subdir := range currDir.subdirectories {
+		childClosest := findClosestAbove(subdir, sizeThreshold)
+		if childClosest > 0 && childClosest < closest {
+			closest = childClosest
 		}
 	}
 	return closest
@@ -96,61 +83,26 @@ func parseInput(input []string) *dir {
 	root := NewDir("/", nil)
 	currDir := root
 
-	lineNum := 0
-	for lineNum < len(input) {
-		line := input[lineNum]
+	for _, line := range input {
 		tokens := strings.Split(line, " ")
-
 		switch tokens[0] {
 		case "$":
 			switch tokens[1] {
-
 			case "cd":
 				switch tokens[2] {
 				case "/":
 					currDir = root
 				case "..":
-					currDir = currDir.parent()
+					currDir = currDir.parent
 				default:
-					if child, ok := currDir.children[tokens[2]]; !ok {
-						panic("Child not found")
-					} else if child.isDir() {
-						currDir = child.(*dir)
-					} else {
-						panic("cd into non directory")
-					}
-				}
-				lineNum++
-
-			case "ls":
-				lineNum++
-				for lineNum < len(input) {
-					line := input[lineNum]
-					tokens := strings.Split(line, " ")
-
-					if tokens[0] == "$" {
-						break
-					}
-
-					switch tokens[0] {
-					case "dir":
-						if _, ok := currDir.children[tokens[1]]; !ok {
-							currDir.children[tokens[1]] = NewDir(tokens[1], currDir)
-						}
-					default: // Number, will be filesize
-						size, err := strconv.Atoi(tokens[0])
-						if err != nil {
-							panic(err)
-						}
-						if _, ok := currDir.children[tokens[1]]; !ok {
-							currDir.children[tokens[1]] = NewFile(tokens[1], currDir, size)
-						}
-					}
-					lineNum++
+					currDir, _ = currDir.subdirectories[tokens[2]]
 				}
 			}
+		case "dir":
+			currDir.subdirectories[tokens[1]] = NewDir(tokens[1], currDir)
 		default:
-			panic("Not a command")
+			size, _ := strconv.Atoi(tokens[0])
+			currDir.files[tokens[1]] = NewFile(tokens[1], currDir, size)
 		}
 	}
 
