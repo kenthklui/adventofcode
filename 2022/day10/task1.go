@@ -27,24 +27,27 @@ type instruction struct {
 	val    int
 }
 
-func run(instructions []*instruction) int {
-	signalSum := 0
+func run(instructions []*instruction) []int {
+	registerValues := make([]int, 0, 240)
 
-	checkpoint := 20
-	cycle := 1
 	register := 1
 	for _, ins := range instructions {
-		if cycle+ins.cycles > checkpoint {
-			signalSum += checkpoint * register
-			checkpoint += 40
-			// Break needed when 220 is reached?
+		for i := 0; i < ins.cycles; i++ {
+			registerValues = append(registerValues, register)
 		}
 
-		cycle += ins.cycles
 		register += ins.val
 	}
 
-	return signalSum
+	return registerValues
+}
+
+func signalStrengthSum(registerValues []int) int {
+	sum := 0
+	for checkpoint := 20; checkpoint <= 220; checkpoint += 40 {
+		sum += checkpoint * registerValues[checkpoint-1]
+	}
+	return sum
 }
 
 func parseInput(input []string) []*instruction {
@@ -72,5 +75,6 @@ func parseInput(input []string) []*instruction {
 func main() {
 	input := readInput()
 	instructions := parseInput(input)
-	fmt.Println(run(instructions))
+	registerValues := run(instructions)
+	fmt.Println(signalStrengthSum(registerValues))
 }
