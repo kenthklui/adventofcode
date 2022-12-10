@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"os"
 	"strconv"
@@ -71,28 +72,54 @@ func NewInstruction(s []string) instruction {
 
 type ALUProgram struct {
 	instructions []instruction
+	m            Memoizer
 	// At the start of next program, a variable is overwritten with inp
 	// Store this for deduplication purposes
-	overwriteIndex int
+	nextOverwrite int
 }
 
 func NewALUProgram() *ALUProgram {
-	return &ALUProgram{[]instruction{}, -1}
+	return &ALUProgram{
+		instructions:  make([]instruction, 0),
+		m:             make(Memoizer),
+		nextOverwrite: -1,
+	}
 }
 
 func (ap *ALUProgram) addInstruction(s []string) {
 	ap.instructions = append(ap.instructions, NewInstruction(s))
 }
 
-type ALU struct {
-	val []int
+func (ap *ALUProgram) execute(alu *ALU, inp int) *ALU {
+	nextAlu := alu.child(inp)
+
+	inpIns := ap.instructions[0]
+	inpIns.command(nextAlu, inpIns.variable, inp)
+
+	for _, ins := range ap.instructions[1:] {
+		ins.command(nextAlu, ins.variable, ins.param)
+	}
+
+	if ap.nextOverwrite >= 0 {
+		nextAlu.val[ap.nextOverwrite] = 0
+	}
+
+	return nextAlu
 }
 
-func NewALU() *ALU { return &ALU{[]int{0, 0, 0, 0}} }
-func (alu *ALU) makeCopy() *ALU {
-	aluCopy := ALU{make([]int, len(alu.val))}
-	copy(aluCopy.val, alu.val)
-	return &aluCopy
+type ALU struct {
+	val    [4]int
+	parent *ALU
+	digit  int
+}
+
+func (alu *ALU) child(digit int) *ALU {
+	newAlu := new(ALU)
+	newAlu.val = alu.val
+	newAlu.parent = alu
+	newAlu.digit = digit
+
+	return newAlu
 }
 
 func inpVariable(alu *ALU, varIndex, param int)      { alu.val[varIndex] = param }
@@ -119,57 +146,16 @@ func eqlValue(alu *ALU, varIndex, param int) {
 	}
 }
 
-func (alu *ALU) execute(ap *ALUProgram, inp int) {
-	inpIns := ap.instructions[0]
-	inpIns.command(alu, inpIns.variable, inp)
+type ALUKey [3]int
 
-	for _, ins := range ap.instructions[1:] {
-		ins.command(alu, ins.variable, ins.param)
-	}
+func (alu ALU) key() ALUKey {
+	return [3]int{alu.val[0] - alu.val[1], alu.val[1] - alu.val[2], alu.val[2] - alu.val[3]}
 }
 
-type ALUState struct {
-	w, x, y, z int
-}
+type void struct{}
+type Memoizer map[ALUKey]void
 
-func (alu *ALU) state(overwriteIndex int) ALUState {
-	if overwriteIndex == -1 {
-		return ALUState{alu.val[0], alu.val[1], alu.val[2], alu.val[3]}
-	}
-
-	var temp int
-
-	alu.val[overwriteIndex], temp = temp, alu.val[overwriteIndex]
-	als := ALUState{alu.val[0], alu.val[1], alu.val[2], alu.val[3]}
-	alu.val[overwriteIndex], temp = temp, alu.val[overwriteIndex]
-
-	return als
-}
-
-var empty struct{}
-
-type Memoizer struct {
-	cache []map[ALUState]struct{}
-}
-
-func NewMemoizer(length int) *Memoizer {
-	cache := make([]map[ALUState]struct{}, length)
-	for i := range cache {
-		cache[i] = make(map[ALUState]struct{})
-	}
-
-	return &Memoizer{cache}
-}
-
-func (m *Memoizer) check(step int, als ALUState) bool {
-	_, ok := m.cache[step][als]
-	return ok
-}
-
-// Set something as a dead end
-func (m *Memoizer) kill(step int, als ALUState) {
-	m.cache[step][als] = empty
-}
+var empty void
 
 func numString(digits []int) string {
 	var b strings.Builder
@@ -180,59 +166,73 @@ func numString(digits []int) string {
 }
 
 type modelNumFinder struct {
-	aps        []*ALUProgram
-	memoizer   *Memoizer
-	completion int
+	aps []*ALUProgram
 }
 
 func NewModelNumFinder(aps []*ALUProgram) *modelNumFinder {
-	return &modelNumFinder{
-		aps:        aps,
-		memoizer:   NewMemoizer(len(aps)),
-		completion: 0,
-	}
+	return &modelNumFinder{aps: aps}
 }
 
 func (mnf *modelNumFinder) find() (string, error) {
-	success, digits := mnf.recursiveFind(NewALU(), 0)
-	if success {
-		return numString(digits), nil
-	} else {
-		return "", fmt.Errorf("Failed to find model number")
+	steps := len(mnf.aps)
+
+	aluChs := make([]chan *ALU, steps+1)
+	aluChs[0] = make(chan *ALU)
+	ctx, cancel := context.WithCancel(context.Background())
+	for i, ap := range mnf.aps {
+		aluChs[i+1] = make(chan *ALU, 2048)
+		go chFind(aluChs[i], aluChs[i+1], ap, ctx)
+	}
+
+	aluChs[0] <- new(ALU)
+	close(aluChs[0])
+
+	for alu := range aluChs[steps] {
+		if alu.val[3] == 0 {
+			cancel()
+			return mnf.digitString(alu), nil
+		}
+	}
+
+	return "", fmt.Errorf("Failed to find model number")
+}
+
+func chFind(inCh <-chan *ALU, outCh chan<- *ALU, ap *ALUProgram, ctx context.Context) {
+Loop:
+	for alu := range inCh {
+		for nextDigit := 9; nextDigit > 0; nextDigit-- {
+			nextAlu := ap.execute(alu, nextDigit)
+
+			key := nextAlu.key()
+			if _, ok := ap.m[key]; !ok {
+				ap.m[key] = empty
+				select {
+				case <-ctx.Done():
+					break Loop
+				case outCh <- nextAlu:
+				}
+			}
+		}
+	}
+
+	close(outCh)
+	for _ = range inCh {
 	}
 }
 
-func (mnf *modelNumFinder) recursiveFind(alu *ALU, step int) (bool, []int) {
-	if step == len(mnf.aps) {
-		if alu.val[3] == 0 {
-			return true, []int{}
-		} else {
-			return false, nil
-		}
+func (mnf *modelNumFinder) digitString(alu *ALU) string {
+	generations := 0
+	for ancestor := alu; ancestor.parent != nil; ancestor = ancestor.parent {
+		generations++
 	}
 
-	als := alu.state(mnf.aps[step].overwriteIndex)
-	if mnf.memoizer.check(step, als) {
-		return false, nil
+	dig := make([]int, generations)
+	for curr := alu; generations > 0; curr = curr.parent {
+		generations--
+		dig[generations] = curr.digit
 	}
 
-	for nextDigit := 9; nextDigit > 0; nextDigit-- {
-		nextAlu := alu.makeCopy()
-		nextAlu.execute(mnf.aps[step], nextDigit)
-
-		if success, digits := mnf.recursiveFind(nextAlu, step+1); success {
-			return true, append([]int{nextDigit}, digits...)
-		}
-	}
-
-	mnf.memoizer.kill(step, als)
-
-	if step == 2 {
-		mnf.completion++
-		// fmt.Printf("Finished searching %d%% of search space\n", mnf.completion)
-	}
-
-	return false, nil
+	return numString(dig)
 }
 
 func readInput() []string {
@@ -258,7 +258,7 @@ func parseInput(input []string) []*ALUProgram {
 		splits := strings.Split(line, " ")
 		if splits[0] == "inp" {
 			if ap != nil {
-				ap.overwriteIndex = getALUIndex(splits[1])
+				ap.nextOverwrite = getALUIndex(splits[1])
 			}
 
 			ap = NewALUProgram()
