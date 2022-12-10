@@ -71,7 +71,6 @@ func (c1 *cuboid) subtract(c2 *cuboid) []*cuboid {
 		return []*cuboid{c1}
 	}
 
-	remainder := make([]*cuboid, 0)
 	xMins := []int{c1.xMin, intersection.xMin, intersection.xMax + 1}
 	yMins := []int{c1.yMin, intersection.yMin, intersection.yMax + 1}
 	zMins := []int{c1.zMin, intersection.zMin, intersection.zMax + 1}
@@ -79,20 +78,24 @@ func (c1 *cuboid) subtract(c2 *cuboid) []*cuboid {
 	yMaxs := []int{intersection.yMin - 1, intersection.yMax, c1.yMax}
 	zMaxs := []int{intersection.zMin - 1, intersection.zMax, c1.zMax}
 
-	for i := 0; i < 3; i++ {
-		for j := 0; j < 3; j++ {
-			for k := 0; k < 3; k++ {
-				// Skip intersection cuboid
-				if i == 1 && j == 1 && k == 1 {
-					continue
-				}
-
-				c := NewCuboid(xMins[i], xMaxs[i], yMins[j], yMaxs[j], zMins[k], zMaxs[k])
-				if c != nil {
-					remainder = append(remainder, c)
-				}
-			}
-		}
+	remainder := make([]*cuboid, 0, 6)
+	if c := NewCuboid(xMins[0], xMaxs[0], c1.yMin, c1.yMax, c1.zMin, c1.zMax); c != nil {
+		remainder = append(remainder, c)
+	}
+	if c := NewCuboid(xMins[2], xMaxs[2], c1.yMin, c1.yMax, c1.zMin, c1.zMax); c != nil {
+		remainder = append(remainder, c)
+	}
+	if c := NewCuboid(xMins[1], xMaxs[1], yMins[0], yMaxs[0], c1.zMin, c1.zMax); c != nil {
+		remainder = append(remainder, c)
+	}
+	if c := NewCuboid(xMins[1], xMaxs[1], yMins[2], yMaxs[2], c1.zMin, c1.zMax); c != nil {
+		remainder = append(remainder, c)
+	}
+	if c := NewCuboid(xMins[1], xMaxs[1], yMins[1], yMaxs[1], zMins[0], zMaxs[0]); c != nil {
+		remainder = append(remainder, c)
+	}
+	if c := NewCuboid(xMins[1], xMaxs[1], yMins[1], yMaxs[1], zMins[2], zMaxs[2]); c != nil {
+		remainder = append(remainder, c)
 	}
 
 	return remainder
