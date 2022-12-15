@@ -111,7 +111,7 @@ func buildMap(sensors []sensor, minVal, maxVal int) []*beacons {
 			_, startX := intMinMax(s.x-dx, 0)
 			endX, _ := intMinMax(s.x+dx, maxVal)
 
-			bm[y].addRange(beaconRange{startX, endX})
+			bm[y-minVal].addRange(beaconRange{startX, endX})
 		}
 	}
 
@@ -119,17 +119,17 @@ func buildMap(sensors []sensor, minVal, maxVal int) []*beacons {
 }
 
 func findBeacon(sensors []sensor, minVal, maxVal int) (int, int) {
-	for y, br := range buildMap(sensors, minVal, maxVal) {
+	for i, br := range buildMap(sensors, minVal, maxVal) {
 		x := 0
 		for _, r := range br.ranges {
 			if x < r.start {
-				return x, y
+				return x, i + minVal
 			}
 
 			x = r.end + 1
 		}
 		if x <= maxVal {
-			return x, y
+			return x, i + minVal
 		}
 	}
 
