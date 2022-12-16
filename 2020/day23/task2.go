@@ -5,9 +5,6 @@ import (
 	"fmt"
 	"os"
 	"strconv"
-	"strings"
-
-	"container/list"
 )
 
 func readInput() []string {
@@ -24,112 +21,82 @@ func readInput() []string {
 	return lines
 }
 
-func CupString(cups *list.List, startValue int) string {
-	var b strings.Builder
-
-	for c := cups.Front(); c != nil; c = c.Next() {
-		fmt.Fprintf(&b, "%d", c.Value.(int))
-	}
-
-	return b.String()
-}
+type Cups []int
 
 type Circle struct {
-	min, max  int
-	cups      *list.List
-	cupsIndex []*list.Element
-}
-
-func (c *Circle) String() string {
-	return CupString(c.cups, 0)
+	min, max, front int
+	cups            Cups
 }
 
 func readCircle(input []string, realMax int) *Circle {
-	cups := list.New()
-	cupsIndex := make([]*list.Element, realMax+1)
+	cups := make([]int, realMax+1)
+
 	min, max := 9, 1
-
+	var front, prev int
 	for i := range input[0] {
-		if num, err := strconv.Atoi(input[0][i : i+1]); err == nil {
-			if min > num {
-				min = num
-			}
-			if max < num {
-				max = num
-			}
-
-			e := cups.PushBack(num)
-			cupsIndex[num] = e
-		} else {
+		num, err := strconv.Atoi(input[0][i : i+1])
+		if err != nil {
 			panic(err)
 		}
+
+		if min > num {
+			min = num
+		}
+		if max < num {
+			max = num
+		}
+
+		if prev == 0 {
+			front = num
+		} else {
+			cups[prev] = num
+		}
+		prev = num
 	}
 
-	for i := max + 1; i <= realMax; i++ {
-		e := cups.PushBack(i)
-		cupsIndex[i] = e
+	if realMax > max {
+		cups[prev] = max + 1
+		for i := max + 1; i < realMax; i++ {
+			cups[i] = i + 1
+		}
+		cups[realMax] = front
+	} else {
+		cups[prev] = front
 	}
-	max = realMax
 
-	return &Circle{min, max, cups, cupsIndex}
+	return &Circle{min, realMax, front, cups}
+}
+
+func (c *Circle) NextDest(dest int) int {
+	dest--
+	if dest < c.min {
+		dest = c.max
+	}
+	return dest
 }
 
 func (c *Circle) Move() {
-	current := c.cups.Front()
-
 	pickup := make([]int, 3)
+	pickup[0] = c.cups[c.front]
+	pickup[1] = c.cups[pickup[0]]
+	pickup[2] = c.cups[pickup[1]]
 
-	for i := 0; i < 3; i++ {
-		next := current.Next()
-		pickup[i] = c.cups.Remove(next).(int)
+	dest := c.NextDest(c.front)
+	for dest == pickup[0] || dest == pickup[1] || dest == pickup[2] {
+		dest = c.NextDest(dest)
 	}
 
-	destValue := current.Value.(int)
-	for {
-		if destValue == c.min {
-			destValue = c.max
-		} else {
-			destValue--
-		}
-
-		found := false
-		for i := 0; i < 3; i++ {
-			found = found || (pickup[i] == destValue)
-		}
-
-		if !found {
-			break
-		}
-	}
-
-	dest := c.cupsIndex[destValue]
-
-	for i := 0; i < 3; i++ {
-		dest = c.cups.InsertAfter(pickup[i], dest)
-		c.cupsIndex[pickup[i]] = dest
-	}
-
-	front := c.cups.Remove(c.cups.Front())
-	e := c.cups.PushBack(front)
-	c.cupsIndex[front.(int)] = e
+	c.cups[c.front] = c.cups[pickup[2]]
+	c.cups[pickup[2]] = c.cups[dest]
+	c.cups[dest] = pickup[0]
+	c.front = c.cups[c.front]
 }
 
 func (c *Circle) Solution() string {
-	l := list.New()
-	l.PushBackList(c.cups)
-	l.PushBackList(c.cups)
+	value1 := c.cups[1]
+	value2 := c.cups[value1]
 
-	start := l.Front()
-	for start.Value.(int) != 1 {
-		start = start.Next()
-	}
-
-	start = start.Next()
-	star1 := start.Value.(int)
-	start = start.Next()
-	star2 := start.Value.(int)
-
-	return fmt.Sprintf("%d", star1*star2)
+	return fmt.Sprintf("%d", value1*value2)
 }
 
 func main() {
