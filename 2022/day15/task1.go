@@ -27,29 +27,24 @@ func (s sensor) manhattan() int {
 func countImpossible(sensors []sensor, row int) int {
 	bm := make(map[int]bool)
 	for _, s := range sensors {
-		if s.by == row {
-			bm[s.bx] = true
-		}
-
-		man := s.manhattan()
 		y1, y2 := intMinMax(s.y, row)
-		extend := man - (y2 - y1)
+		extend := s.manhattan() - (y2 - y1)
 		if extend >= 0 {
 			for x := s.x - extend; x <= s.x+extend; x++ {
-				if _, ok := bm[x]; !ok {
-					bm[x] = false
-				}
+				bm[x] = false
 			}
 		}
 	}
 
-	count := 0
-	for _, v := range bm {
-		if !v {
-			count++
+	for _, s := range sensors {
+		if s.by == row {
+			if _, ok := bm[s.bx]; ok {
+				delete(bm, s.bx)
+			}
 		}
 	}
-	return count
+
+	return len(bm)
 }
 
 func readInput() []string {
