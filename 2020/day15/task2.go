@@ -22,10 +22,14 @@ func readInput() []string {
 	return lines
 }
 
-func seed(input []string) ([]int, map[int]int) {
+func seed(input []string, target int) ([]int, []int) {
 	numStr := strings.Split(input[0], ",")
 	nums := make([]int, len(numStr))
-	lastOccurence := make(map[int]int)
+
+	lastOccurence := make([]int, target)
+	for i := range lastOccurence {
+		lastOccurence[i] = -1
+	}
 
 	for i, s := range numStr {
 		if num, err := strconv.Atoi(s); err == nil {
@@ -39,12 +43,12 @@ func seed(input []string) ([]int, map[int]int) {
 	return nums, lastOccurence
 }
 
-func iterate(nums []int, lastOccurence map[int]int, target int) int {
+func iterate(nums []int, lastOccurence []int, target int) int {
 	prev := nums[len(nums)-1]
 	for i := len(nums); i < target; i++ {
 		var newNum int
 
-		if lastOccur, ok := lastOccurence[prev]; ok {
+		if lastOccur := lastOccurence[prev]; lastOccur != -1 {
 			newNum = i - 1 - lastOccur
 		}
 
@@ -57,7 +61,8 @@ func iterate(nums []int, lastOccurence map[int]int, target int) int {
 
 func main() {
 	input := readInput()
-	nums, lastOccurence := seed(input)
-	num := iterate(nums, lastOccurence, 30000000)
+	target := 30000000
+	nums, lastOccurence := seed(input, target)
+	num := iterate(nums, lastOccurence, target)
 	fmt.Println(num)
 }
