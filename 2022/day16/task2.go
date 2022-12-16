@@ -13,29 +13,26 @@ type valve struct {
 	travelCost map[*valve]int
 }
 
+func (v valve) String() string { return v.name }
+
 type state struct {
 	flow, score, time int
 	key               uint64
-	nextAvail         []int
-	curr, unopened    []*valve
+	curr              *valve
+	unopened          []*valve
 }
 
-func NewState(actors, time int, valves map[string]*valve) *state {
+func NewState(time int, valves map[string]*valve) *state {
 	start := valves["AA"]
 	s := state{
-		flow:      0,
-		score:     0,
-		time:      time,
-		key:       0,
-		nextAvail: make([]int, actors),
-		curr:      make([]*valve, actors),
-		unopened:  make([]*valve, 0, len(valves)),
+		flow:     0,
+		score:    0,
+		time:     time,
+		key:      uint64(0),
+		curr:     valves["AA"],
+		unopened: make([]*valve, 0, len(valves)),
 	}
 
-	for i := 0; i < actors; i++ {
-		s.curr[i] = start
-		s.nextAvail[i] = time
-	}
 	for _, v := range valves {
 		if v == start {
 			continue
@@ -48,34 +45,35 @@ func NewState(actors, time int, valves map[string]*valve) *state {
 
 func (s *state) Copy() *state {
 	ns := &state{
-		flow:      s.flow,
-		score:     s.score,
-		time:      s.time,
-		key:       s.key,
-		nextAvail: make([]int, len(s.nextAvail)),
-		curr:      make([]*valve, len(s.curr)),
-		unopened:  make([]*valve, len(s.unopened)),
+		flow:     s.flow,
+		score:    s.score,
+		time:     s.time,
+		key:      s.key,
+		curr:     s.curr,
+		unopened: make([]*valve, len(s.unopened)),
 	}
 
-	copy(ns.nextAvail, s.nextAvail)
-	copy(ns.curr, s.curr)
 	copy(ns.unopened, s.unopened)
 
 	return ns
 }
 
-func (s *state) moveActor(actor, unopenIndex int) *state {
+func (s *state) openValve(unopenIndex int) *state {
 	dest := s.unopened[unopenIndex]
 
-	timeCost := s.curr[actor].travelCost[dest] + 1
+	timeCost := s.curr.travelCost[dest] + 1
 	eta := s.time - timeCost
-	if eta <= 0 { // out of time
+	if eta <= 0 {
 		return nil
 	}
 
 	ns := s.Copy()
-	ns.curr[actor] = dest
-	ns.nextAvail[actor] = eta
+	ns.score += ns.flow * timeCost
+	ns.flow += dest.flow
+	ns.time = eta
+	ns.curr = dest
+
+	ns.key += uint64(1) << dest.id
 
 	end := len(s.unopened) - 1
 	ns.unopened[unopenIndex], ns.unopened[end] = ns.unopened[end], ns.unopened[unopenIndex]
@@ -84,97 +82,73 @@ func (s *state) moveActor(actor, unopenIndex int) *state {
 	return ns
 }
 
-func (s *state) nextAction() ([]int, int) {
-	var nextTime int
-	actors := make([]int, 0)
-	for i, t := range s.nextAvail {
-		if t > nextTime {
-			actors = []int{i}
-			nextTime = t
-		} else if t == nextTime {
-			actors = append(actors, i)
+type memo struct {
+	states map[uint64]*state
+}
+
+func (s *state) recursiveFill(m *memo, maxFlow int) {
+	prevState, prevStateOk := m.states[s.key]
+	if prevStateOk {
+		if s.score+maxFlow*s.time <= prevState.score {
+			return
 		}
 	}
-	return actors, nextTime
-}
+	for unopenIndex := range s.unopened {
+		if ns := s.openValve(unopenIndex); ns != nil {
+			ns.recursiveFill(m, maxFlow)
+		}
+	}
 
-func (s *state) openValve(v *valve) {
-	// Use a bitmask to store valve open status
-	if (s.key>>v.id)&1 == 0 {
-		s.flow += v.flow
-		s.key |= uint64(1) << v.id
+	score := s.score + s.time*s.flow
+	if !prevStateOk || score > prevState.score {
+		s.score = score
+		m.states[s.key] = s
 	}
 }
 
-type trace struct {
-	time, actor, nextAvail int
-	valveName              string
-}
-
-func (s *state) recursiveOpen(path []trace, maxScore, maxFlow int) int {
-	// Which actors are active (aka. not enroute) at this time stamp?
-	// And what is the time?
-	actors, nextTime := s.nextAction()
-
-	// Update score pressure
-	duration := s.time - nextTime
-	s.score += s.flow * duration
-	s.time = nextTime
-
-	// Shortcut: if it's impossible to beat the already known max score, exit
-	if s.score+s.time*maxFlow <= maxScore {
+func (s *state) recursiveOpen(maxScore, maxFlow int) int {
+	if s.score+maxFlow*s.time <= maxScore {
 		return maxScore
 	}
 
-	// Open any pending valves
-	for _, actor := range actors {
-		s.openValve(s.curr[actor])
-	}
-
-	for _, actor := range actors {
-		// Check every possible move by the actor
-		for unopenIndex, dest := range s.unopened {
-			if ns := s.moveActor(actor, unopenIndex); ns != nil {
-				newPath := append(path, trace{ns.time, actor, ns.nextAvail[actor], dest.name})
-				if score := ns.recursiveOpen(newPath, maxScore, maxFlow); score > maxScore {
-					maxScore = score
-				}
-			}
-		}
-
-		// Check for actor waiting 1 minute doing nothing
-		// Sometimes, the best strategy is waiting for the other guy to do something better
-		// This is likely necessary until we are running out of valves to open
-		if len(s.unopened) < len(s.curr)*2 {
-			ns := s.Copy()
-			ns.nextAvail[actor]--
-			if score := ns.recursiveOpen(path, maxScore, maxFlow); score > maxScore {
+	for unopenIndex := range s.unopened {
+		if ns := s.openValve(unopenIndex); ns != nil {
+			if score := ns.recursiveOpen(maxScore, maxFlow); score > maxScore {
 				maxScore = score
 			}
 		}
 	}
-
-	// Check the "wait until end of time" case
-	if waitScore := s.score + s.time*s.flow; waitScore > maxScore {
-		maxScore = waitScore
+	if score := s.score + s.time*s.flow; score > maxScore {
+		maxScore = score
 	}
 
-	// Debug printout
-	// if len(path) <= 2 {
-	// 	fmt.Println(path)
-	// }
 	return maxScore
 }
 
 func openValves(valves map[string]*valve) int {
-	s := NewState(2, 26, valves)
+	maxTime := 26
 
 	maxFlow := 0
 	for _, v := range valves {
 		maxFlow += v.flow
 	}
 
-	return s.recursiveOpen([]trace{}, 0, maxFlow)
+	s := NewState(maxTime, valves)
+	m := memo{make(map[uint64]*state)}
+	s.recursiveFill(&m, maxFlow)
+
+	var maxScore int
+	for _, s := range m.states {
+		s.time = maxTime
+		s.curr = valves["AA"]
+		s.flow = 0
+
+		if score := s.recursiveOpen(maxScore, maxFlow); score > maxScore {
+			maxScore = score
+		}
+	}
+
+	return maxScore
 }
 
 func readInput() []string {
@@ -250,7 +224,6 @@ func parseInput(input []string) map[string]*valve {
 func main() {
 	input := readInput()
 	valves := parseInput(input)
-	score := openValves(valves)
 
-	fmt.Println(score)
+	fmt.Println(openValves(valves))
 }
