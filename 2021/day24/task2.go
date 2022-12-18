@@ -90,6 +90,9 @@ func (ap *ALUProgram) addInstruction(s []string) {
 	ap.instructions = append(ap.instructions, NewInstruction(s))
 }
 
+const registerMaxBits = 32
+const registerMaxSize = 1 << (registerMaxBits - 1)
+
 func (ap *ALUProgram) execute(alu *ALU, inp int) *ALU {
 	nextAlu := alu.child(inp)
 
@@ -98,6 +101,12 @@ func (ap *ALUProgram) execute(alu *ALU, inp int) *ALU {
 
 	for _, ins := range ap.instructions[1:] {
 		ins.command(nextAlu, ins.variable, ins.param)
+	}
+
+	for _, v := range nextAlu.val {
+		if v > registerMaxSize || v < -registerMaxSize {
+			return nil
+		}
 	}
 
 	if ap.nextOverwrite >= 0 {
@@ -146,10 +155,14 @@ func eqlValue(alu *ALU, varIndex, param int) {
 	}
 }
 
-type ALUKey [3]int
+type ALUKey [3]int32
 
 func (alu ALU) key() ALUKey {
-	return [3]int{alu.val[0] - alu.val[1], alu.val[1] - alu.val[2], alu.val[2] - alu.val[3]}
+	return [3]int32{
+		int32(alu.val[0] - alu.val[1]),
+		int32(alu.val[1] - alu.val[2]),
+		int32(alu.val[2] - alu.val[3]),
+	}
 }
 
 type void struct{}
@@ -202,6 +215,9 @@ Loop:
 	for alu := range inCh {
 		for nextDigit := 1; nextDigit <= 9; nextDigit++ {
 			nextAlu := ap.execute(alu, nextDigit)
+			if nextAlu == nil {
+				continue
+			}
 
 			key := nextAlu.key()
 			if _, ok := ap.m[key]; !ok {
