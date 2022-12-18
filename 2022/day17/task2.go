@@ -4,38 +4,39 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"sort"
+	"strconv"
 	"strings"
 )
 
+const rockCycle = 5
+const caveWidth = 7
+
+type pnt struct {
+	x, y int
+}
+
+//
+// Cave stuff
+//
+
 type cave struct {
-	rockCount, jetCount, floor, height int
+	rockCount, jetCycle, floor, height int
 	currRock                           *rock
-	space                              [][7]*rock
+	space                              [][caveWidth]*rock
 	pattern                            []int8
 }
 
 func NewCave() *cave {
 	return &cave{
 		rockCount: 0,
-		jetCount:  0,
+		jetCycle:  0,
 		floor:     0,
 		height:    0,
 		currRock:  nil,
-		space:     make([][7]*rock, 0),
+		space:     make([][caveWidth]*rock, 0),
 		pattern:   make([]int8, 0),
 	}
-}
-
-func (c *cave) tetrisMove(times int) {
-	for i := 0; i < times; i++ {
-		c.addRock()
-		cont := true
-		for cont {
-			c.applyJet()
-			cont = c.dropRock()
-		}
-	}
-	c.truncateOld()
 }
 
 func (c *cave) setSpace(p pnt, val *rock) {
@@ -48,7 +49,7 @@ func (c *cave) getSpace(p pnt) *rock {
 	return c.space[y][p.x]
 }
 
-func (c *cave) getSpaceRow(y int) [7]*rock {
+func (c *cave) getSpaceRow(y int) [caveWidth]*rock {
 	y -= c.floor
 	return c.space[y]
 }
@@ -60,16 +61,23 @@ func (c *cave) addRock() {
 
 	spaceHeight := c.height - c.floor
 	for len(c.space) <= spaceHeight {
-		c.space = append(c.space, [7]*rock{nil, nil, nil, nil, nil, nil, nil})
+		c.space = append(c.space, [caveWidth]*rock{nil, nil, nil, nil, nil, nil, nil})
 	}
 	for _, p := range c.currRock.pnts() {
 		c.setSpace(p, c.currRock)
 	}
 }
 
+func (c *cave) dropOneRock() {
+	c.addRock()
+	for falling := true; falling; falling = c.rockFall() {
+		c.applyJet()
+	}
+}
+
 func (c *cave) applyJet() {
-	direction := c.pattern[c.jetCount%len(c.pattern)]
-	c.jetCount++
+	direction := c.pattern[c.jetCycle]
+	c.jetCycle = (c.jetCycle + 1) % len(c.pattern)
 
 	var add, rem []pnt
 	switch direction {
@@ -80,7 +88,7 @@ func (c *cave) applyJet() {
 	}
 	// Collision check
 	for _, p := range add {
-		if p.x < 0 || p.x >= 7 {
+		if p.x < 0 || p.x >= caveWidth {
 			return
 		}
 		if c.getSpace(p) != nil {
@@ -94,10 +102,11 @@ func (c *cave) applyJet() {
 	for _, p := range rem {
 		c.setSpace(p, nil)
 	}
+
 	c.currRock.pos.x += int(direction)
 }
 
-func (c *cave) dropRock() bool {
+func (c *cave) rockFall() bool {
 	add, rem := c.currRock.downDelta()
 	// Collision check
 	for _, p := range add {
@@ -128,42 +137,46 @@ func (c *cave) dropRock() bool {
 	return true
 }
 
+// Top-down, row-by-row rainfilling algorithm to find a safe cutoff
 func (c *cave) findCutoff() int {
-	// Top-down, row-by-row rainfilling algorithm to find safe cutoff
 	topRowNum := c.height - c.floor
 
-	var prevRow [7]bool
+	var prevFill [caveWidth]bool
 	for i, v := range c.space[topRowNum] {
-		prevRow[i] = (v == nil) // fill top row by default
+		prevFill[i] = (v == nil) // fill top row empty spaces
 	}
 
 	for rowNum := topRowNum - 1; rowNum >= 0; rowNum-- {
-		var row [7]bool
-		emptyRow := true
-		for j, v := range row {
-			if v || c.space[rowNum][j] != nil || !prevRow[j] { // skip if filled
+		row := c.space[rowNum]
+
+		var newFill [caveWidth]bool
+		cellFilled := false
+		for x, r := range row {
+			// Skip filed cells
+			if newFill[x] {
 				continue
 			}
-			row[j] = true // fill cell
-			emptyRow = false
-			for k := j - 1; k >= 0; k-- { // fill leftward
-				if row[k] || c.space[rowNum][k] != nil {
-					break
+
+			// Fill if cell is empty and direct above is filled, otherwise skip
+			if r == nil && prevFill[x] {
+				newFill[x] = true
+				cellFilled = true
+
+				// Fill neighbors leftward
+				for l := x - 1; l >= 0 && row[l] == nil && !newFill[l]; l-- {
+					newFill[l] = true
 				}
-				row[k] = true
-			}
-			for k := j + 1; k < 7; k++ { // fill rightward
-				if c.space[rowNum][k] != nil {
-					break
+				// Fill neighbors rightward
+				for r := x + 1; r < caveWidth && row[r] == nil; r++ {
+					newFill[r] = true
 				}
-				row[k] = true
 			}
 		}
 
-		if emptyRow { // No cell was filled on this row
+		if !cellFilled { // No cell was filled on this row
 			return rowNum
 		}
-		prevRow = row
+		prevFill = newFill
 	}
 
 	return 0
@@ -177,6 +190,11 @@ func (c *cave) truncateOld() {
 
 func (c *cave) signature() string {
 	var b strings.Builder
+
+	jetStr := strconv.FormatInt(int64(c.jetCycle), 32)
+	b.WriteString(jetStr)
+	b.WriteString("-")
+
 	for _, row := range c.space {
 		var i byte
 		for _, r := range row {
@@ -191,17 +209,24 @@ func (c *cave) signature() string {
 
 		b.WriteByte(i)
 	}
-	jetStr := fmt.Sprintf("%06d", c.jetCount%len(c.pattern))
-	b.WriteString(jetStr)
+
 	return b.String()
 }
 
-// This isn't needed if the iteration count is divisible
 func (c *cave) restore(sig string) {
-	c.space = make([][7]*rock, len(sig))
+	splits := strings.SplitN(sig, "-", 2)
+
+	if jetCycle, err := strconv.ParseInt(splits[0], 32, 64); err == nil {
+		c.jetCycle = int(jetCycle)
+	} else {
+		panic(err)
+	}
+
+	spaceStr := splits[1]
 	fakeRock := NewRock(0, 0)
-	for i, r := range sig {
-		for j := 0; j < 7; j++ {
+	c.space = make([][caveWidth]*rock, len(spaceStr))
+	for i, r := range spaceStr {
+		for j := 0; j < caveWidth; j++ {
 			if (r>>j)&1 == 1 {
 				c.space[i][6-j] = fakeRock
 			}
@@ -228,9 +253,118 @@ func (c cave) Print() {
 	fmt.Println(b.String())
 }
 
-type pnt struct {
-	x, y int
+type snapshot struct {
+	sig                 string
+	heightInc, floorInc int
 }
+
+type snapshots map[string]snapshot
+
+func (snaps snapshots) String() string {
+	lines := make([]string, 0, len(snaps))
+	for _, s := range snaps {
+		ps := []byte(strings.SplitN(s.sig, "-", 2)[1])
+		l := fmt.Sprintf("%d %d %v\n", s.heightInc, s.floorInc, ps)
+		lines = append(lines, l)
+	}
+	sort.Strings(lines)
+	return strings.Join(lines, "")
+}
+
+func (c *cave) dropRocks(rocks int) {
+	cycleLength := rockCycle * rockCycle
+
+	if rocks >= cycleLength*rockCycle {
+		snaps := make(snapshots)
+		sig := c.signature()
+		for rocks >= cycleLength {
+			if _, cached := snaps[sig]; cached {
+				c.cachedDropRocks(&rocks, cycleLength, snaps)
+				break
+			}
+
+			storedHeight := c.height
+			storedFloor := c.floor
+			for i := 0; i < cycleLength; i++ {
+				c.dropOneRock()
+				rocks--
+			}
+			c.truncateOld()
+			snap := snapshot{
+				sig:       c.signature(),
+				heightInc: c.height - storedHeight,
+				floorInc:  c.floor - storedFloor,
+			}
+			snaps[sig] = snap
+			sig = snap.sig
+		}
+	}
+
+	// Handle remainder
+	for ; rocks > 0; rocks-- {
+		c.dropOneRock()
+	}
+}
+
+func (c *cave) cachedDropRocks(rocks *int, cycleLength int, snaps snapshots) {
+	sig := c.signature()
+
+	// Super cycle: exponentially cache larger jump sizes
+	if *rocks >= cycleLength*rockCycle {
+		newSnaps := make(snapshots)
+		newCycle := cycleLength * rockCycle
+		for *rocks >= newCycle {
+			if _, cached := newSnaps[sig]; cached {
+				c.restore(sig)
+				c.cachedDropRocks(rocks, newCycle, newSnaps)
+				sig = c.signature()
+				break
+			}
+
+			prevSig := sig
+			storedHeight := c.height
+			storedFloor := c.floor
+			for i := 0; i < rockCycle; i++ {
+				if snap, ok := snaps[sig]; ok {
+					sig = snap.sig
+					*rocks -= cycleLength
+
+					c.rockCount += cycleLength
+					c.height += snap.heightInc
+					c.floor += snap.floorInc
+				} else {
+					panic("Unknown sig")
+				}
+			}
+			snap := snapshot{
+				sig:       sig,
+				heightInc: c.height - storedHeight,
+				floorInc:  c.floor - storedFloor,
+			}
+			newSnaps[prevSig] = snap
+		}
+	}
+
+	// Base cycle: handle the remainder
+	for *rocks >= cycleLength {
+		if snap, ok := snaps[sig]; ok {
+			sig = snap.sig
+			*rocks -= cycleLength
+
+			c.rockCount += cycleLength
+			c.height += snap.heightInc
+			c.floor += snap.floorInc
+		} else {
+			panic("Unknown sig")
+		}
+	}
+
+	c.restore(sig)
+}
+
+//
+// Rock stuff
+//
 
 type rock struct {
 	pos      pnt
@@ -359,6 +493,10 @@ func (r *rock) downDelta() ([]pnt, []pnt) {
 	return add, rem
 }
 
+//
+// I/O & main
+//
+
 func readInput() []string {
 	lines := make([]string, 0)
 	scanner := bufio.NewScanner(os.Stdin)
@@ -389,54 +527,11 @@ func parseInput(input []string) *cave {
 	return c
 }
 
-type snapshot struct {
-	sig                 string
-	heightInc, floorInc int
-}
-
-func (c *cave) cachedDropRocks(goal int) int {
-	cycleLength := 10000 // Assume goal is divisble for now
-	snaps := make(map[string]snapshot)
-
-	var sig string
-	for {
-		if _, ok := snaps[sig]; ok {
-			break
-		}
-
-		prevHeight := c.height
-		prevFloor := c.floor
-		c.tetrisMove(cycleLength)
-
-		newSig := c.signature()
-		snaps[sig] = snapshot{
-			sig:       newSig,
-			heightInc: c.height - prevHeight,
-			floorInc:  c.floor - prevFloor,
-		}
-
-		sig = newSig
-	}
-
-	rockCount := c.rockCount
-	height := c.height
-	floor := c.floor
-	for rockCount < goal {
-		// TODO: Handle non divisor cases
-		snap, _ := snaps[sig]
-		rockCount += cycleLength
-		sig = snap.sig
-		height += snap.heightInc
-		floor += snap.floorInc
-	}
-	return height
-}
-
 func main() {
 	input := readInput()
 	c := parseInput(input)
 
-	goal := 1000000000000
-	height := c.cachedDropRocks(goal)
-	fmt.Println(height)
+	const goal = 1000000000000
+	c.dropRocks(goal)
+	fmt.Println(c.height)
 }
