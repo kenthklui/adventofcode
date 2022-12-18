@@ -6,7 +6,10 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"sync"
 )
+
+const workerCount = 8
 
 type valve struct {
 	id, flow int
@@ -63,7 +66,6 @@ type cave struct {
 	start              *valve
 	valves, goodValves valveList
 	travelCost         [][]int
-	memo               map[uint64]*state
 }
 
 func NewCave(valves map[string]*valve, tunnels map[string][]string) cave {
@@ -110,8 +112,6 @@ func NewCave(valves map[string]*valve, tunnels map[string][]string) cave {
 	}
 	c.travelCost = cost
 
-	c.memo = make(map[uint64]*state)
-
 	return c
 }
 
@@ -139,10 +139,10 @@ func (c cave) openValve(s *state, unopenedId int) *state {
 	return ns
 }
 
-func (c *cave) recursiveFill(s *state) {
-	prevState, ok := c.memo[s.key]
+func (c *cave) recursiveFill(s *state, memo map[uint64]*state) {
+	prevState, ok := memo[s.key]
 	if ok {
-		maxPossibleScore := s.score + c.maxFlow*s.time
+		maxPossibleScore := s.score + c.maxFlow*(s.time-1)
 		if maxPossibleScore <= prevState.score {
 			return
 		}
@@ -150,21 +150,26 @@ func (c *cave) recursiveFill(s *state) {
 
 	for unopenedId := range s.unopened {
 		if ns := c.openValve(s, unopenedId); ns != nil {
-			c.recursiveFill(ns)
+			c.recursiveFill(ns, memo)
 		}
 	}
 
-	score := s.score + s.time*s.flow
-	if !ok || score > prevState.score {
-		s.score = score
-		c.memo[s.key] = s
+	waitScore := s.score + s.time*s.flow
+	if !ok || waitScore > prevState.score {
+		s.score = waitScore
+		memo[s.key] = s
 	}
 }
 
 func (c *cave) recursiveOpen(s *state, maxScore *int) {
-	maxPossibleScore := s.score + c.maxFlow*s.time
+	maxPossibleScore := s.score + c.maxFlow*(s.time-1)
 	if maxPossibleScore <= *maxScore {
 		return
+	}
+
+	waitScore := s.score + s.time*s.flow
+	if waitScore > *maxScore {
+		*maxScore = waitScore
 	}
 
 	for unopenedId := range s.unopened {
@@ -172,28 +177,46 @@ func (c *cave) recursiveOpen(s *state, maxScore *int) {
 			c.recursiveOpen(ns, maxScore)
 		}
 	}
-
-	score := s.score + s.time*s.flow
-	if score > *maxScore {
-		*maxScore = score
-	}
 }
 
 func (c *cave) openValves() int {
 	maxTime := 26
-	manState := NewState(maxTime, c.start.id, c.goodValves)
 
-	c.recursiveFill(manState)
+	manState := NewState(maxTime, c.start.id, c.goodValves)
+	memo := make(map[uint64]*state)
+	c.recursiveFill(manState, memo)
+
+	// Multithreaded elephant search to speed things up
+	stateCh := make(chan *state, workerCount)
+	go func(sCh chan<- *state) {
+		for _, s := range memo {
+			s.time = maxTime
+			s.currId = c.start.id
+			s.flow = 0
+			sCh <- s
+		}
+		close(sCh)
+	}(stateCh)
+
+	var wg sync.WaitGroup
+	maxScores := make([]int, workerCount)
+	for i := 0; i < workerCount; i++ {
+		wg.Add(1)
+		go func(sCh <-chan *state, maxScore *int) {
+			defer wg.Done()
+			for s := range sCh {
+				c.recursiveOpen(s, maxScore)
+			}
+		}(stateCh, &maxScores[i])
+	}
+	wg.Wait()
 
 	maxScore := 0
-	for _, eleState := range c.memo {
-		eleState.time = maxTime
-		eleState.currId = c.start.id
-		eleState.flow = 0
-
-		c.recursiveOpen(eleState, &maxScore)
+	for _, s := range maxScores {
+		if s > maxScore {
+			maxScore = s
+		}
 	}
-
 	return maxScore
 }
 
