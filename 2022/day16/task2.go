@@ -4,40 +4,35 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 )
 
 type valve struct {
-	id, flow   int
-	name       string
-	travelCost map[*valve]int
+	id, flow int
+	name     string
 }
 
 func (v valve) String() string { return v.name }
 
 type state struct {
-	flow, score, time int
-	key               uint64
-	curr              *valve
-	unopened          []*valve
+	flow, score, time, currId int
+	key                       uint64
+	unopened                  []int
 }
 
-func NewState(time int, valves map[string]*valve) *state {
-	start := valves["AA"]
+func NewState(time, startId int, goodValves valveList) *state {
 	s := state{
+		currId:   startId,
 		flow:     0,
 		score:    0,
 		time:     time,
 		key:      uint64(0),
-		curr:     valves["AA"],
-		unopened: make([]*valve, 0, len(valves)),
+		unopened: make([]int, 0, len(goodValves)),
 	}
 
-	for _, v := range valves {
-		if v == start {
-			continue
-		}
-		s.unopened = append(s.unopened, v)
+	for _, v := range goodValves {
+		s.unopened = append(s.unopened, v.id)
 	}
 
 	return &s
@@ -45,23 +40,85 @@ func NewState(time int, valves map[string]*valve) *state {
 
 func (s *state) Copy() *state {
 	ns := &state{
+		currId:   s.currId,
 		flow:     s.flow,
 		score:    s.score,
 		time:     s.time,
 		key:      s.key,
-		curr:     s.curr,
-		unopened: make([]*valve, len(s.unopened)),
+		unopened: make([]int, len(s.unopened)),
 	}
-
 	copy(ns.unopened, s.unopened)
 
 	return ns
 }
 
-func (s *state) openValve(unopenIndex int) *state {
-	dest := s.unopened[unopenIndex]
+type valveList []*valve
 
-	timeCost := s.curr.travelCost[dest] + 1
+func (vl valveList) Len() int           { return len(vl) }
+func (vl valveList) Less(i, j int) bool { return vl[i].flow > vl[j].flow }
+func (vl valveList) Swap(i, j int)      { vl[i], vl[j] = vl[j], vl[i] }
+
+type cave struct {
+	maxFlow            int
+	start              *valve
+	valves, goodValves valveList
+	travelCost         [][]int
+	memo               map[uint64]*state
+}
+
+func NewCave(valves map[string]*valve, tunnels map[string][]string) cave {
+	var c cave
+
+	c.start = valves["AA"]
+
+	// Store valves in a slice for faster access
+	// Also create list of useful tunnels with non-zero flow
+	c.valves = make(valveList, len(valves))
+	c.goodValves = make(valveList, 0, len(valves))
+	for _, v := range valves {
+		c.valves[v.id] = v
+		if v.flow > 0 {
+			c.goodValves = append(c.goodValves, v)
+			c.maxFlow += v.flow
+		}
+	}
+	sort.Sort(c.goodValves)
+
+	// Floyd-Warshall for setting travel costs
+	cost := make([][]int, len(valves))
+	for i := range cost {
+		cost[i] = make([]int, len(valves))
+		for j := range cost[i] {
+			cost[i][j] = len(valves)
+		}
+		cost[i][i] = 0
+	}
+	for source, dests := range tunnels {
+		for _, dest := range dests {
+			sId, dId := valves[source].id, valves[dest].id
+			cost[sId][dId] = 1
+		}
+	}
+	for mid := range cost {
+		for from := range cost {
+			for to := range cost {
+				if cost[from][to] > cost[from][mid]+cost[mid][to] {
+					cost[from][to] = cost[from][mid] + cost[mid][to]
+				}
+			}
+		}
+	}
+	c.travelCost = cost
+
+	c.memo = make(map[uint64]*state)
+
+	return c
+}
+
+func (c cave) openValve(s *state, unopenedId int) *state {
+	destId := s.unopened[unopenedId]
+
+	timeCost := c.travelCost[s.currId][destId] + 1
 	eta := s.time - timeCost
 	if eta <= 0 {
 		return nil
@@ -69,83 +126,72 @@ func (s *state) openValve(unopenIndex int) *state {
 
 	ns := s.Copy()
 	ns.score += ns.flow * timeCost
-	ns.flow += dest.flow
+	ns.flow += c.valves[destId].flow
 	ns.time = eta
-	ns.curr = dest
+	ns.currId = destId
 
-	ns.key += uint64(1) << dest.id
+	ns.key += uint64(1) << destId
 
 	end := len(s.unopened) - 1
-	ns.unopened[unopenIndex], ns.unopened[end] = ns.unopened[end], ns.unopened[unopenIndex]
+	ns.unopened[unopenedId], ns.unopened[end] = ns.unopened[end], ns.unopened[unopenedId]
 	ns.unopened = ns.unopened[:end]
 
 	return ns
 }
 
-type memo struct {
-	states map[uint64]*state
-}
-
-func (s *state) recursiveFill(m *memo, maxFlow int) {
-	prevState, prevStateOk := m.states[s.key]
-	if prevStateOk {
-		if s.score+maxFlow*s.time <= prevState.score {
+func (c *cave) recursiveFill(s *state) {
+	prevState, ok := c.memo[s.key]
+	if ok {
+		maxPossibleScore := s.score + c.maxFlow*s.time
+		if maxPossibleScore <= prevState.score {
 			return
 		}
 	}
-	for unopenIndex := range s.unopened {
-		if ns := s.openValve(unopenIndex); ns != nil {
-			ns.recursiveFill(m, maxFlow)
+
+	for unopenedId := range s.unopened {
+		if ns := c.openValve(s, unopenedId); ns != nil {
+			c.recursiveFill(ns)
 		}
 	}
 
 	score := s.score + s.time*s.flow
-	if !prevStateOk || score > prevState.score {
+	if !ok || score > prevState.score {
 		s.score = score
-		m.states[s.key] = s
+		c.memo[s.key] = s
 	}
 }
 
-func (s *state) recursiveOpen(maxScore, maxFlow int) int {
-	if s.score+maxFlow*s.time <= maxScore {
-		return maxScore
+func (c *cave) recursiveOpen(s *state, maxScore *int) {
+	maxPossibleScore := s.score + c.maxFlow*s.time
+	if maxPossibleScore <= *maxScore {
+		return
 	}
 
-	for unopenIndex := range s.unopened {
-		if ns := s.openValve(unopenIndex); ns != nil {
-			if score := ns.recursiveOpen(maxScore, maxFlow); score > maxScore {
-				maxScore = score
-			}
+	for unopenedId := range s.unopened {
+		if ns := c.openValve(s, unopenedId); ns != nil {
+			c.recursiveOpen(ns, maxScore)
 		}
 	}
-	if score := s.score + s.time*s.flow; score > maxScore {
-		maxScore = score
-	}
 
-	return maxScore
+	score := s.score + s.time*s.flow
+	if score > *maxScore {
+		*maxScore = score
+	}
 }
 
-func openValves(valves map[string]*valve) int {
+func (c *cave) openValves() int {
 	maxTime := 26
+	manState := NewState(maxTime, c.start.id, c.goodValves)
 
-	maxFlow := 0
-	for _, v := range valves {
-		maxFlow += v.flow
-	}
+	c.recursiveFill(manState)
 
-	s := NewState(maxTime, valves)
-	m := memo{make(map[uint64]*state)}
-	s.recursiveFill(&m, maxFlow)
+	maxScore := 0
+	for _, eleState := range c.memo {
+		eleState.time = maxTime
+		eleState.currId = c.start.id
+		eleState.flow = 0
 
-	var maxScore int
-	for _, s := range m.states {
-		s.time = maxTime
-		s.curr = valves["AA"]
-		s.flow = 0
-
-		if score := s.recursiveOpen(maxScore, maxFlow); score > maxScore {
-			maxScore = score
-		}
+		c.recursiveOpen(eleState, &maxScore)
 	}
 
 	return maxScore
@@ -163,8 +209,8 @@ func readInput() []string {
 	return lines
 }
 
-func parseInput(input []string) map[string]*valve {
-	destinations := make(map[string][]string)
+func parseInput(input []string) cave {
+	tunnels := make(map[string][]string)
 	valves := make(map[string]*valve)
 	for i, line := range input {
 		v := valve{id: i}
@@ -175,55 +221,17 @@ func parseInput(input []string) map[string]*valve {
 		}
 
 		split := strings.Split(line, " to valve")
-		destinations[v.name] = strings.Split(strings.Trim(split[1], "s "), ", ")
+		tunnels[v.name] = strings.Split(strings.Trim(split[1], "s "), ", ")
 
 		valves[v.name] = &v
 	}
 
-	for _, v := range valves {
-		v.travelCost = make(map[*valve]int)
-		for _, destName := range destinations[v.name] {
-			dest := valves[destName]
-			v.travelCost[dest] = 1
-		}
-	}
-
-	for _, source := range valves {
-		// Use BFS to compute distance between every pair of valves
-		queue := destinations[source.name]
-		for index := 0; index < len(queue); index++ {
-			edgeName := queue[index]
-			edge := valves[edgeName]
-			edgeTravelTime := source.travelCost[edge]
-
-			for _, neighborName := range destinations[edgeName] {
-				neighbor := valves[neighborName]
-				if _, ok := source.travelCost[neighbor]; !ok {
-					source.travelCost[neighbor] = edgeTravelTime + 1
-					queue = append(queue, neighborName)
-				}
-			}
-		}
-	}
-
-	// Purge useless destinations with no flow
-	for k, v1 := range valves {
-		if v1.flow == 0 && v1.name != "AA" {
-			delete(valves, k)
-			for _, v2 := range valves {
-				if _, ok := v2.travelCost[v1]; ok {
-					delete(v2.travelCost, v1)
-				}
-			}
-		}
-	}
-
-	return valves
+	return NewCave(valves, tunnels)
 }
 
 func main() {
 	input := readInput()
-	valves := parseInput(input)
-
-	fmt.Println(openValves(valves))
+	caverns := parseInput(input)
+	score := caverns.openValves()
+	fmt.Println(score)
 }
