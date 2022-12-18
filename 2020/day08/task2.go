@@ -3,7 +3,6 @@ package main
 import (
 	"bufio"
 	"fmt"
-	"log"
 	"os"
 )
 
@@ -84,7 +83,7 @@ func (m *machine) TryFixes() {
 			m.Ops[i].Operation = "jmp"
 
 			if result, err := m.Run(); err == nil {
-				log.Printf("Succeeded fixing %d, accumulator: %d\n", i, result)
+				fmt.Printf("Succeeded fixing %d, accumulator: %d\n", i, result)
 				return
 			}
 
@@ -96,7 +95,7 @@ func (m *machine) TryFixes() {
 			m.Ops[i].Operation = "nop"
 
 			if result, err := m.Run(); err == nil {
-				log.Printf("Succeeded fixing %d, accumulator: %d\n", i, result)
+				fmt.Printf("Succeeded fixing %d, accumulator: %d\n", i, result)
 				return
 			}
 
@@ -105,7 +104,7 @@ func (m *machine) TryFixes() {
 		}
 	}
 
-	log.Fatal("Failed to find a fix")
+	panic(fmt.Errorf("Failed to find a fix"))
 }
 
 func runOps() {
@@ -118,7 +117,7 @@ func runOps() {
 
 		n, err := fmt.Sscanf(scanner.Text(), "%s %d", &operation, &value)
 		if err != nil || n != 2 {
-			log.Fatalf("Failed to parse line: %q", scanner.Text())
+			panic(fmt.Errorf("Failed to parse line: %q", scanner.Text()))
 		}
 
 		ops = append(ops, op{false, operation, value})

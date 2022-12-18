@@ -3,13 +3,12 @@ package main
 import (
 	"bufio"
 	"fmt"
-	"log"
 	"os"
 )
 
 func failOnErr(err error) {
 	if err != nil {
-		log.Fatal(err)
+		panic(err)
 	}
 }
 
@@ -18,13 +17,16 @@ type combo struct {
 }
 
 func readPreambleSize() (int, error) {
-	if len(os.Args) < 2 {
-		return 0, fmt.Errorf("Usage: day8 <preambleSize> < input.txt")
-	}
-
 	var preambleSize int
-	if _, err := fmt.Sscanf(os.Args[1], "%d", &preambleSize); err != nil {
-		return 0, fmt.Errorf("Failed to parse preamble size: %q, reason: %q", os.Args[1], err.Error())
+	if len(os.Args) < 2 {
+		preambleSize = 25
+	} else {
+		_, err := fmt.Sscanf(os.Args[1], "%d", &preambleSize)
+		if err != nil {
+			err := fmt.Errorf("Failed to parse preamble size: %q, reason: %q",
+				os.Args[1], err.Error())
+			return 0, err
+		}
 	}
 	return preambleSize, nil
 }
@@ -37,7 +39,7 @@ func readValues() []int {
 	for scanner.Scan() {
 		n, err := fmt.Sscanf(scanner.Text(), "%d", &value)
 		if err != nil || n != 1 {
-			log.Fatal("Failed to parse line: %q", scanner.Text())
+			panic(fmt.Errorf("Failed to parse line: %q", scanner.Text()))
 		}
 
 		values = append(values, value)
@@ -58,10 +60,9 @@ func findNonSum(values []int, preambleSize int) (int, error) {
 	for i := preambleSize; i < len(values); i++ {
 		value := values[i]
 		if c, ok := sums[value]; !ok { // not a sum
-			log.Printf("Not a sum: %d", value)
 			return value, nil
 		} else if i-c.FirstIndex > preambleSize { // outdated sum
-			log.Printf(
+			fmt.Printf(
 				"Old sum: %d[%d] = %d[%d] + %d[%d}",
 				value, i,
 				values[c.FirstIndex], c.FirstIndex,
@@ -92,7 +93,7 @@ func findContSum(values []int, target int) (combo, error) {
 			newRun := run + iValue
 			if newRun == target {
 
-				log.Printf("Target %d is a sum from [%d] to [%d}", target, j, i)
+				fmt.Printf("Target %d is a sum from [%d] to [%d}", target, j, i)
 				return combo{j, i}, nil
 			}
 
