@@ -8,6 +8,114 @@ import (
 	"strings"
 )
 
+func intMinMax(a, b int) (int, int) {
+	if a < b {
+		return a, b
+	} else {
+		return b, a
+	}
+}
+
+type point struct {
+	x, y, z int
+}
+
+func (p point) neighbors() []point {
+	return []point{
+		point{p.x - 1, p.y, p.z}, point{p.x + 1, p.y, p.z},
+		point{p.x, p.y - 1, p.z}, point{p.x, p.y + 1, p.z},
+		point{p.x, p.y, p.z - 1}, point{p.x, p.y, p.z + 1},
+	}
+}
+
+type cube struct {
+	val                    [][][]bool
+	startX, startY, startZ int
+}
+
+func NewCube(startX, startY, startZ, endX, endY, endZ int) *cube {
+	sizeX, sizeY, sizeZ := endX-startX+1, endY-startY+1, endZ-startZ+1
+	val := make([][][]bool, sizeX)
+	for x := range val {
+		val[x] = make([][]bool, sizeY)
+		for y := range val[x] {
+			val[x][y] = make([]bool, sizeZ)
+		}
+	}
+
+	return &cube{val: val, startX: startX, startY: startY, startZ: startZ}
+}
+
+func (c *cube) get(p point) (bool, error) {
+	cx, cy, cz := p.x-c.startX, p.y-c.startY, p.z-c.startZ
+	if cx < 0 || cx >= len(c.val) ||
+		cy < 0 || cy >= len(c.val[cx]) ||
+		cz < 0 || cz >= len(c.val[cx][cy]) {
+		return false, fmt.Errorf("Out of bounds")
+	}
+	return c.val[cx][cy][cz], nil
+}
+
+func (c *cube) set(p point, val bool) error {
+	cx, cy, cz := p.x-c.startX, p.y-c.startY, p.z-c.startZ
+	if cx < 0 || cx >= len(c.val) ||
+		cy < 0 || cy >= len(c.val[cx]) ||
+		cz < 0 || cz >= len(c.val[cx][cy]) {
+		return fmt.Errorf("Out of bounds")
+	}
+
+	c.val[cx][cy][cz] = val
+	return nil
+}
+
+func (c *cube) origin() point {
+	return point{c.startX, c.startY, c.startZ}
+}
+
+func (c *cube) copySize() *cube {
+	val := make([][][]bool, len(c.val))
+	for x := range val {
+		val[x] = make([][]bool, len(c.val[0]))
+		for y := range val[x] {
+			val[x][y] = make([]bool, len(c.val[0][0]))
+		}
+	}
+
+	return &cube{val: val, startX: c.startX, startY: c.startY, startZ: c.startZ}
+}
+
+func externalSurfaceArea(lava *cube) int {
+	world := lava.copySize()
+	return recurseCountArea(world, lava, world.origin())
+}
+
+func recurseCountArea(world, lava *cube, p point) int {
+	if err := world.set(p, true); err != nil {
+		panic(err)
+	}
+
+	sum := 0
+	for _, n := range p.neighbors() {
+		if checked, err := world.get(n); err == nil {
+			if checked {
+				continue
+			}
+		} else {
+			continue
+		}
+
+		if hit, err := lava.get(n); err == nil {
+			if hit {
+				sum++
+			} else {
+				sum += recurseCountArea(world, lava, n)
+			}
+		}
+	}
+
+	return sum
+}
+
 func readInput() []string {
 	lines := make([]string, 0)
 	scanner := bufio.NewScanner(os.Stdin)
@@ -20,168 +128,41 @@ func readInput() []string {
 	return lines
 }
 
-type void struct{}
-type grid map[int]plane
-type plane map[int]line
-type line map[int]void
-
-func (g grid) get(x, y, z int) bool {
-	if p, ok1 := g[x]; ok1 {
-		if l, ok2 := p[y]; ok2 {
-			if _, ok3 := l[z]; ok3 {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-var empty void
-
-func parseInput(input []string) grid {
-	g := make(grid)
-
-	for _, text := range input {
-		splits := strings.Split(text, ",")
-		x, _ := strconv.Atoi(splits[0])
-		y, _ := strconv.Atoi(splits[1])
-		z, _ := strconv.Atoi(splits[2])
-		if _, ok := g[x]; !ok {
-			g[x] = make(plane)
-		}
-		if _, ok := g[x][y]; !ok {
-			g[x][y] = make(line)
-		}
-		g[x][y][z] = empty
-	}
-
-	return g
-}
-
-type cube struct {
-	val                    [][][]bool
-	startX, startY, startZ int
-}
-
-func NewCube(startX, startY, startZ, sizeX, sizeY, sizeZ int) cube {
-	var c cube
-	c.val = make([][][]bool, sizeX)
-	for x := range c.val {
-		c.val[x] = make([][]bool, sizeY)
-		for y := range c.val[x] {
-			c.val[x][y] = make([]bool, sizeZ)
-		}
-	}
-	c.startX, c.startY, c.startZ = startX, startY, startZ
-	return c
-}
-func (c cube) get(x, y, z int) bool {
-	cx, cy, cz := x-c.startX, y-c.startY, z-c.startZ
-	if cx < 0 || cx >= len(c.val) ||
-		cy < 0 || cy >= len(c.val[cx]) ||
-		cz < 0 || cz >= len(c.val[cx][cy]) {
-		return true
-	}
-	return c.val[cx][cy][cz]
-}
-func (c cube) set(x, y, z int, val bool) {
-	cx, cy, cz := x-c.startX, y-c.startY, z-c.startZ
-	c.val[cx][cy][cz] = val
-}
-
-func externalSurfaceArea(g grid) int {
+func parseInput(input []string) *cube {
 	minX, minY, minZ := 1000, 1000, 1000
 	maxX, maxY, maxZ := -1000, -1000, -1000
 
-	for x, p := range g {
-		if x > maxX {
-			maxX = x
-		}
-		if x < minX {
-			minX = x
-		}
-		for y, l := range p {
-			if y > maxY {
-				maxY = y
-			}
-			if y < minY {
-				minY = y
-			}
-			for z := range l {
-				if z > maxZ {
-					maxZ = z
-				}
-				if z < minZ {
-					minZ = z
-				}
-			}
+	lava := make([]point, 0, len(input))
+	for _, text := range input {
+		var p point
+		splits := strings.Split(text, ",")
+		p.x, _ = strconv.Atoi(splits[0])
+		p.y, _ = strconv.Atoi(splits[1])
+		p.z, _ = strconv.Atoi(splits[2])
+		lava = append(lava, p)
+
+		minX, _ = intMinMax(p.x, minX)
+		minY, _ = intMinMax(p.y, minY)
+		minZ, _ = intMinMax(p.z, minZ)
+		_, maxX = intMinMax(p.x, maxX)
+		_, maxY = intMinMax(p.y, maxY)
+		_, maxZ = intMinMax(p.z, maxZ)
+	}
+
+	// Leave some space around the edges to manuever!
+	c := NewCube(minX-1, minY-1, minZ-1, maxX+1, maxY+1, maxZ+1)
+	for _, p := range lava {
+		if err := c.set(p, true); err != nil {
+			panic(err)
 		}
 	}
 
-	// Give the cube extra space so we can manuever around the edges
-	sizeX := maxX - minX + 3
-	sizeY := maxY - minY + 3
-	sizeZ := maxZ - minZ + 3
-	startX := minX - 1
-	startY := minY - 1
-	startZ := minZ - 1
-
-	c := NewCube(startX, startY, startZ, sizeX, sizeY, sizeZ)
-	return recurseCountArea(c, g, startX, startY, startZ)
-}
-
-func recurseCountArea(c cube, g grid, x, y, z int) int {
-	c.set(x, y, z, true)
-
-	sum := 0
-	if !c.get(x-1, y, z) {
-		if g.get(x-1, y, z) {
-			sum++
-		} else {
-			sum += recurseCountArea(c, g, x-1, y, z)
-		}
-	}
-	if !c.get(x+1, y, z) {
-		if g.get(x+1, y, z) {
-			sum++
-		} else {
-			sum += recurseCountArea(c, g, x+1, y, z)
-		}
-	}
-	if !c.get(x, y-1, z) {
-		if g.get(x, y-1, z) {
-			sum++
-		} else {
-			sum += recurseCountArea(c, g, x, y-1, z)
-		}
-	}
-	if !c.get(x, y+1, z) {
-		if g.get(x, y+1, z) {
-			sum++
-		} else {
-			sum += recurseCountArea(c, g, x, y+1, z)
-		}
-	}
-	if !c.get(x, y, z-1) {
-		if g.get(x, y, z-1) {
-			sum++
-		} else {
-			sum += recurseCountArea(c, g, x, y, z-1)
-		}
-	}
-	if !c.get(x, y, z+1) {
-		if g.get(x, y, z+1) {
-			sum++
-		} else {
-			sum += recurseCountArea(c, g, x, y, z+1)
-		}
-	}
-
-	return sum
+	return c
 }
 
 func main() {
 	input := readInput()
-	object := parseInput(input)
-	fmt.Println(externalSurfaceArea(object))
+	lava := parseInput(input)
+	surfaceArea := externalSurfaceArea(lava)
+	fmt.Println(surfaceArea)
 }
