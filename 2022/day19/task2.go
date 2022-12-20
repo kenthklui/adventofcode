@@ -137,7 +137,7 @@ func (inv *inventory) key(bp *blueprint) invkey {
 	for i, c := range bp.maxCosts {
 		k *= uint64(c + 1)
 		k += uint64(inv.bots[i])
-		k *= uint64(c + 1)
+		k *= uint64(c*2 + 1)
 		k += uint64(inv.resources[i])
 	}
 	return invkey(k)
