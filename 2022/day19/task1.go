@@ -16,6 +16,14 @@ type blueprint struct {
 	maxCosts [3]uint8
 }
 
+func uint8Min(a, b uint8) uint8 {
+	if a < b {
+		return a
+	} else {
+		return b
+	}
+}
+
 func uint8Max(a, b uint8) uint8 {
 	if a > b {
 		return a
@@ -44,7 +52,7 @@ func NewBlueprint(params ...uint8) *blueprint {
 type inventory struct {
 	// ore, clay, obsidian, geode
 	resources, bots [4]uint8
-	time            uint8
+	time, nextBuild uint8
 }
 
 func NewInventory() *inventory {
@@ -55,7 +63,7 @@ func NewInventory() *inventory {
 	}
 }
 
-func (inv inventory) dup() *inventory {
+func (inv *inventory) dup() *inventory {
 	return &inventory{
 		resources: inv.resources,
 		bots:      inv.bots,
@@ -69,61 +77,84 @@ func (inv *inventory) gather() {
 	}
 }
 
-func (inv *inventory) build(bp *blueprint, buildOrder int) {
-	for i, cost := range bp.costs[buildOrder] {
+func (inv *inventory) build(bp *blueprint) {
+	for i, cost := range bp.costs[inv.nextBuild] {
 		inv.resources[i] -= cost
 	}
-	inv.bots[buildOrder]++
+	inv.bots[inv.nextBuild]++
 }
 
-func (inv *inventory) minute(bp *blueprint, buildOrder int) *inventory {
-	newInv := inv.dup()
-	newInv.gather()
-	if buildOrder >= 0 {
-		newInv.build(bp, buildOrder)
+func (inv *inventory) minute(bp *blueprint) bool {
+	canBuild := (inv.checkAfford(bp, inv.nextBuild) == 1)
+	inv.gather()
+	if canBuild {
+		inv.build(bp)
 	}
-	newInv.pruneExcessResources(bp)
-	newInv.time++
+	inv.pruneExcessResources(bp)
+	inv.time++
+
+	return canBuild
+}
+
+func (inv *inventory) withBuildTarget(nextBot uint8) *inventory {
+	newInv := inv.dup()
+	newInv.nextBuild = nextBot
 	return newInv
 }
 
 func (inv *inventory) pruneExcessResources(bp *blueprint) {
 	for i := 0; i < 3; i++ {
-		if inv.bots[i] >= bp.maxCosts[i] && inv.resources[i] > bp.maxCosts[i] {
-			inv.resources[i] = bp.maxCosts[i]
+		if inv.bots[i] >= bp.maxCosts[i] {
+			inv.resources[i] = uint8Min(inv.resources[i], bp.maxCosts[i])
 		}
 	}
 }
 
-func (inv inventory) buildOptions(bp *blueprint) []int {
+func (inv inventory) buildOptions(bp *blueprint) []uint8 {
 	// Always build geode bots when you can
-	if inv.checkAfford(bp, 3) {
-		return []int{3}
-	}
-
-	options := make([]int, 0)
-	// Build a bot only when we can use more of the resource, and can afford it
-	for botIndex := 0; botIndex < 3; botIndex++ {
-		if inv.bots[botIndex] < bp.maxCosts[botIndex] && inv.checkAfford(bp, botIndex) {
-			options = append(options, botIndex)
+	options := make([]uint8, 0)
+	if affordGeode := inv.checkAfford(bp, 3); affordGeode >= 0 {
+		options = append(options, 3)
+		if affordGeode == 1 {
+			return options
 		}
 	}
 
-	// Save only if something was unaffordable
-	if len(options) < 3 {
-		options = append(options, -1)
+	// Build a bot only when we can use more of the resource, and can afford it in the future
+	for botIndex := uint8(0); botIndex < 3; botIndex++ {
+		if inv.canUseBot(bp, botIndex) && inv.checkAfford(bp, botIndex) >= 0 {
+			options = append(options, botIndex)
+		}
 	}
 
 	return options
 }
 
-func (inv inventory) checkAfford(bp *blueprint, botIndex int) bool {
-	for i, cost := range bp.costs[botIndex] {
-		if inv.resources[i] < cost {
-			return false
+func (inv inventory) canUseBot(bp *blueprint, botIndex uint8) bool {
+	timeRemains := int(duration - inv.time - 1)
+	shortfall := timeRemains * (int(inv.bots[botIndex]) - int(bp.maxCosts[botIndex]))
+	projection := shortfall + int(inv.resources[botIndex])
+	return projection < 0
+}
+
+// 1: Can buy now, 0: Can buy if we wait, -1: Can't buy without building another bot first
+func (inv inventory) checkAfford(bp *blueprint, bot uint8) int8 {
+	afford := 0
+	future := 0
+	for i, cost := range bp.costs[bot] {
+		if inv.resources[i] >= cost {
+			afford++
+		} else if inv.bots[i] > 0 {
+			future++
 		}
 	}
-	return true
+	if afford == 3 {
+		return 1
+	} else if afford+future == 3 {
+		return 0
+	} else {
+		return -1
+	}
 }
 
 type invkey uint64
@@ -140,20 +171,23 @@ func (inv *inventory) key(bp *blueprint) invkey {
 		k *= uint64(c*2 + 1)
 		k += uint64(inv.resources[i])
 	}
+	k = k*4 + uint64(inv.nextBuild)
 	return invkey(k)
 }
 
 func maxGeodes(bp *blueprint, minutes uint8) int {
-	m := make(memo, 1<<16)
+	m := make(memo, 1<<15)
 	queue := list.New()
 
 	inv := NewInventory()
-	queue.PushBack(inv)
+	queue.PushBack(inv.withBuildTarget(0))
+	queue.PushBack(inv.withBuildTarget(1))
 
 	var maxGeodes uint8
 	var next *list.Element
 	for e := queue.Front(); e != nil; e = next {
 		inv = e.Value.(*inventory)
+		botBuilt := inv.minute(bp)
 
 		if inv.time == minutes-1 {
 			geodes := inv.resources[3] + inv.bots[3]
@@ -161,13 +195,15 @@ func maxGeodes(bp *blueprint, minutes uint8) int {
 				maxGeodes = geodes
 			}
 		} else {
-			buildOptions := inv.buildOptions(bp)
-			for _, buildOrder := range buildOptions {
-				newInv := inv.minute(bp, buildOrder)
-				key := newInv.key(bp)
-				if _, ok := m[key]; !ok {
-					m[key] = empty
-					queue.PushBack(newInv)
+			key := inv.key(bp)
+			if _, ok := m[key]; !ok {
+				m[key] = empty
+				if botBuilt {
+					for _, nextBot := range inv.buildOptions(bp) {
+						queue.PushBack(inv.withBuildTarget(nextBot))
+					}
+				} else {
+					queue.PushBack(inv)
 				}
 			}
 		}
@@ -222,6 +258,7 @@ func main() {
 	for i, bp := range bps {
 		id := i + 1
 		geodes := maxGeodes(bp, duration)
+		// fmt.Println("Geodes:", geodes)
 		quality := geodes * id
 		qualitySum += quality
 	}
