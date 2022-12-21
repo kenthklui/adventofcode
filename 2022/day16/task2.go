@@ -142,7 +142,7 @@ func (c cave) openValve(s *state, unopenedId int) *state {
 func (c *cave) recursiveFill(s *state, memo map[uint64]*state) {
 	prevState, ok := memo[s.key]
 	if ok {
-		maxPossibleScore := s.score + c.maxFlow*(s.time-1)
+		maxPossibleScore := s.score + s.flow + c.maxFlow*(s.time-1)
 		if maxPossibleScore <= prevState.score {
 			return
 		}
@@ -162,7 +162,7 @@ func (c *cave) recursiveFill(s *state, memo map[uint64]*state) {
 }
 
 func (c *cave) recursiveOpen(s *state, maxScore *int) {
-	maxPossibleScore := s.score + c.maxFlow*(s.time-1)
+	maxPossibleScore := s.score + s.flow + c.maxFlow*(s.time-1)
 	if maxPossibleScore <= *maxScore {
 		return
 	}

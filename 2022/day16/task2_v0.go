@@ -116,14 +116,14 @@ func (s *state) recursiveOpen(maxScore, maxFlow int) int {
 	s.score += s.flow * duration
 	s.time = nextTime
 
-	// Shortcut: if it's impossible to beat the already known max score, exit
-	if s.score+s.time*maxFlow <= maxScore {
-		return maxScore
-	}
-
 	// Open any pending valves
 	for _, actor := range actors {
 		s.openValve(s.curr[actor])
+	}
+
+	// Shortcut: if it's impossible to beat the already known max score, exit
+	if s.score+s.flow+(s.time-1)*maxFlow <= maxScore {
+		return maxScore
 	}
 
 	for _, actor := range actors {
@@ -138,8 +138,8 @@ func (s *state) recursiveOpen(maxScore, maxFlow int) int {
 
 		// Check for actor waiting 1 minute doing nothing
 		// Sometimes, the best strategy is waiting for the other guy to do something better
-		// This is likely necessary until we are running out of valves to open
-		if len(s.unopened) < len(s.curr)*2 {
+		// This is likely necessary only when we are running out of valves to open
+		if len(s.unopened) <= len(s.curr)+1 {
 			ns := s.Copy()
 			ns.nextAvail[actor]--
 			if score := ns.recursiveOpen(maxScore, maxFlow); score > maxScore {
