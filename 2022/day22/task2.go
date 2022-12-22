@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -16,307 +17,275 @@ const left dir = 2
 const up dir = 3
 const invalidDir dir = -1
 
-/*
-	Handcrafted from looking at a paper cube
-
-oldFaceNum direction -> newFaceNum newDirection
-1 up -> 6 right
-1 down -> 3 down
-1 right -> 2 right
-1 left -> 4 right
-2 up -> 6 up
-2 down -> 3 left
-2 right -> 5 left
-2 left -> 1 left
-3 up -> 1 up
-3 down -> 5 down
-3 right -> 2 up
-3 left -> 4 down
-4 up -> 3 right
-4 down -> 6 down
-4 right -> 5 right
-4 left -> 1 right
-5 up -> 3 up
-5 down -> 6 left
-5 right -> 2 left
-5 left -> 4 left
-6 up -> 4 up
-6 down -> 2 down
-6 right -> 5 up
-6 left -> 1 down
-*/
-var mapChange = [6][6]dir{
-	{invalidDir, right, down, right, invalidDir, right},
-	{left, invalidDir, left, invalidDir, left, up},
-	{up, up, invalidDir, down, down, invalidDir},
-	{right, invalidDir, right, invalidDir, right, down},
-	{invalidDir, left, up, left, invalidDir, left},
-	{down, down, invalidDir, up, up, invalidDir},
+func (d dir) String() string {
+	switch d {
+	case 0:
+		return "right"
+	case 1:
+		return "down"
+	case 2:
+		return "left"
+	case 3:
+		return "up"
+	default:
+		return "invalid"
+	}
 }
 
-type vec2d [2]int
+func (d dir) next() dir    { return (d + 1) % 4 }
+func (d dir) prev() dir    { return (d + 3) % 4 }
+func (d dir) flipped() dir { return (d + 2) % 4 }
+func (d dir) turn(turnDir byte) dir {
+	switch turnDir {
+	case 'R':
+		return d.next()
+	case 'L':
+		return d.prev()
+	default:
+		panic("Invalid turn")
+	}
+}
 
 type player struct {
-	cell   *cell
-	facing dir
+	cell      *cell
+	direction dir
 }
 
 func (p *player) move() bool {
-	var next *cell
-	switch p.facing {
-	case right:
-		next = p.cell.right
-	case down:
-		next = p.cell.down
-	case left:
-		next = p.cell.left
-	case up:
-		next = p.cell.up
-	}
-	if next.val == 2 { // wall
+	next := p.cell.neighbors[p.direction]
+	if next.val == '#' { // wall
 		return false
 	}
-
-	if next.face != p.cell.face {
-		p.facing = mapChange[p.cell.face][next.face]
+	if p.cell.face.id != next.face.id {
+		p.direction = (next.face.entrySide(p.cell.face) + 2) % 4
 	}
 	p.cell = next
 	return true
 }
 
 func (p *player) password() int {
-	return 1000*(p.cell.pos[0]+1) + 4*(p.cell.pos[1]+1) + int(p.facing)
+	return 1000*(p.cell.row+1) + 4*(p.cell.col+1) + int(p.direction)
+}
+
+type face struct {
+	id, originRow, originCol int
+	cells                    [][]*cell
+	neighbors                [4]*face
+}
+
+func NewFace(id, originRow, originCol, sideLength int) *face {
+	f := face{
+		id:        id,
+		originRow: originRow,
+		originCol: originCol,
+		cells:     make([][]*cell, sideLength),
+	}
+	for i := range f.cells {
+		f.cells[i] = make([]*cell, sideLength)
+	}
+	return &f
+}
+
+func (f face) sideClockwise(side dir) []*cell {
+	cells := make([]*cell, len(f.cells))
+	n := len(cells) - 1
+	var row, col, rowInc, colInc int
+	switch side {
+	case right:
+		row, col, rowInc, colInc = 0, n, 1, 0
+	case down:
+		row, col, rowInc, colInc = n, n, 0, -1
+	case left:
+		row, col, rowInc, colInc = n, 0, -1, 0
+	case up:
+		row, col, rowInc, colInc = 0, 0, 0, 1
+	}
+	for i := 0; i <= n; i++ {
+		cells[i] = f.cells[row][col]
+		row += rowInc
+		col += colInc
+	}
+
+	return cells
+}
+
+func (f face) entrySide(source *face) dir {
+	for entry := right; entry <= up; entry++ {
+		if f.neighbors[entry] == source {
+			return entry
+		}
+	}
+	return invalidDir
 }
 
 type cell struct {
-	face                  int
-	pos                   vec2d
-	val                   int
-	right, down, left, up *cell
-}
-
-func (c *cell) setDown(downCell *cell) {
-	if c.down != nil {
-		panic("Already set")
-	}
-	c.down = downCell
-	if downCell.up != nil {
-		panic("Already set")
-	}
-	downCell.up = c
-}
-func (c *cell) setRight(rightCell *cell) {
-	if c.right != nil {
-		panic("Already set")
-	}
-	c.right = rightCell
-	if rightCell.left != nil {
-		panic("Already set")
-	}
-	rightCell.left = c
+	face      *face
+	row, col  int
+	val       byte
+	neighbors [4]*cell
 }
 
 type board struct {
-	cells map[vec2d]*cell
+	faces [6]*face
 	p     *player
+	moves []int
+	turns []byte
 }
 
-func turn(turnDir byte, facing dir) dir {
-	switch turnDir {
-	case 'R':
-		switch facing {
-		case up:
-			return right
-		case down:
-			return left
-		case right:
-			return down
-		case left:
-			return up
-		}
-	case 'L':
-		switch facing {
-		case up:
-			return left
-		case down:
-			return right
-		case right:
-			return up
-		case left:
-			return down
-		}
-	}
-	panic("Invalid turn")
-}
-
-func (b *board) run(moves []int, turns []byte) {
-	for i, m := range moves {
-		fmt.Println("Move", m)
+func (b *board) run() {
+	for i, m := range b.moves {
 		for j := 0; j < m; j++ {
 			if !b.p.move() {
 				break
 			}
 		}
-		if i < len(turns) {
-			fmt.Printf("Turn %c\n", turns[i])
-			b.p.facing = turn(turns[i], b.p.facing)
+		if i < len(b.turns) {
+			b.p.direction = b.p.direction.turn(b.turns[i])
 		} else {
 			break
 		}
 	}
 }
 
-func readInput() []string {
-	lines := make([]string, 0)
-	scanner := bufio.NewScanner(os.Stdin)
-	for scanner.Scan() {
-		lines = append(lines, scanner.Text())
+func connectSides(f1, f2 *face, s1, s2 dir) {
+	side1 := f1.sideClockwise(s1)
+	side2 := f2.sideClockwise(s2)
+	n := len(side1) - 1
+	for i := range side1 {
+		cell1, cell2 := side1[i], side2[n-i]
+		cell1.neighbors[s1], cell2.neighbors[s2] = cell2, cell1
 	}
-	if scanner.Err() != nil {
-		panic(scanner.Err())
-	}
-	return lines
+	f1.neighbors[s1], f2.neighbors[s2] = f2, f1
 }
 
-func parseCells(input []string, boardWidth int) map[vec2d]*cell {
-	// This whole section is specific to my input
-	faceSize := boardWidth / 3
-	faceCornerRows := []int{0, 0, faceSize, faceSize * 2, faceSize * 2, faceSize * 3}
-	faceCornerCols := []int{faceSize, faceSize * 2, faceSize, 0, faceSize, 0}
-
-	var faceCells [6]map[vec2d]*cell
-	cells := make(map[vec2d]*cell, boardWidth*boardWidth)
-	var row, col, val int
-
-	for faceNum := range faceCornerRows {
-		faceCells[faceNum] = make(map[vec2d]*cell)
-		cornerRow, cornerCol := faceCornerRows[faceNum], faceCornerCols[faceNum]
-		for row := 0; row < faceSize; row++ {
-			boardRow := cornerRow + row
-			for col := 0; col < faceSize; col++ {
-				boardCol := cornerCol + col
-
-				switch input[boardRow][boardCol] {
-				case ' ':
-					val = 0
-				case '.':
-					val = 1
-				case '#':
-					val = 2
-				}
-
-				boardPos := [2]int{boardRow, boardCol}
-				newCell := cell{
-					face: faceNum,
-					val:  val,
-					pos:  boardPos,
-				}
-				cells[boardPos] = &newCell
-
-				facePos := [2]int{row, col}
-				faceCells[faceNum][facePos] = &newCell
-			}
-		}
-	}
-
-	// Set regular neighbors
-	for faceNum := range faceCornerRows {
-		cornerRow, cornerCol := faceCornerRows[faceNum], faceCornerCols[faceNum]
-		for r := 0; r < faceSize; r++ {
-			row = cornerRow + r
-			for c := 0; c < faceSize; c++ {
-				col = cornerCol + c
-				pos := [2]int{row, col}
-
-				sourceCell := cells[pos]
-				rightPos, downPos := [2]int{row, col + 1}, [2]int{row + 1, col}
-				if c+1 < faceSize {
-					sourceCell.setRight(cells[rightPos])
-				}
-				if r+1 < faceSize {
-					sourceCell.setDown(cells[downPos])
-				}
-			}
-		}
-	}
-
-	n := faceSize - 1
-	for i := 0; i < faceSize; i++ {
-		// 0 up -> 5
-		faceCells[0][vec2d{0, i}].up = faceCells[5][vec2d{i, 0}]
-		faceCells[5][vec2d{i, 0}].left = faceCells[0][vec2d{0, i}]
-		// 0 down -> 2
-		faceCells[0][vec2d{n, i}].setDown(faceCells[2][vec2d{0, i}])
-		// 0 right -> 1
-		faceCells[0][vec2d{i, n}].setRight(faceCells[1][vec2d{i, 0}])
-		// 0 left -> 3
-		faceCells[0][vec2d{i, 0}].left = faceCells[3][vec2d{n - i, 0}]
-		faceCells[3][vec2d{n - i, 0}].left = faceCells[0][vec2d{i, 0}]
-
-		// 1 up -> 5
-		faceCells[5][vec2d{n, i}].setDown(faceCells[1][vec2d{0, i}])
-		// 1 down -> 2
-		faceCells[1][vec2d{n, i}].down = faceCells[2][vec2d{i, n}]
-		faceCells[2][vec2d{i, n}].right = faceCells[1][vec2d{n, i}]
-		// 1 left -> 0: DONE
-		// 1 right -> 4
-		faceCells[1][vec2d{i, n}].right = faceCells[4][vec2d{n - i, n}]
-		faceCells[4][vec2d{n - i, n}].right = faceCells[1][vec2d{i, n}]
-
-		// 2 up -> 0: DONE
-		// 2 down -> 4
-		faceCells[2][vec2d{n, i}].setDown(faceCells[4][vec2d{0, i}])
-		// 2 right -> 1: DONE
-		// 2 left -> 3
-		faceCells[2][vec2d{i, 0}].left = faceCells[3][vec2d{0, i}]
-		faceCells[3][vec2d{0, i}].up = faceCells[2][vec2d{i, 0}]
-
-		// 3 up -> 2: DONE
-		// 3 down -> 5
-		faceCells[3][vec2d{n, i}].setDown(faceCells[5][vec2d{0, i}])
-		// 3 right -> 4
-		faceCells[3][vec2d{i, n}].setRight(faceCells[4][vec2d{i, 0}])
-		// 3 left -> 0: DONE
-
-		// 4 up -> 2: DONE
-		// 4 down -> 5
-		faceCells[4][vec2d{n, i}].down = faceCells[5][vec2d{i, n}]
-		faceCells[5][vec2d{i, n}].right = faceCells[4][vec2d{n, i}]
-		// 4 right -> 1: DONE
-		// 4 left -> 3: DONE
-
-		// 6: ALL DONE
-		// 12 pairs in total handled
-	}
-
-	return cells
-}
-
-func parseInput(input []string) (*board, []int, []byte) {
-	var boardWidth int
-	var lineNum int
-	var line string
-	for lineNum, line = range input {
+func parseCube(input []string) [6]*face {
+	// Count total number of cells to derive cube face size and board width
+	cellCount := 0
+	boardWidth := 0
+	for _, line := range input {
 		if len(line) > boardWidth {
 			boardWidth = len(line)
 		}
-		if line == "" {
-			break
+		for _, r := range line {
+			if r != ' ' {
+				cellCount++
+			}
 		}
 	}
-	boardHeight := lineNum
+	sideLength := int(math.Sqrt(float64(cellCount / 6)))
 
-	b := new(board)
-	b.cells = parseCells(input, boardWidth)
+	// Create faces and parse cells
+	var faces [6]*face
+	faceId := 0
+	faceGrid := make([][]*face, len(input)/sideLength)
+	for faceRowNum := range faceGrid {
+		faceRow := make([]*face, boardWidth/sideLength)
+		faceGrid[faceRowNum] = faceRow
+		boardRowNum := faceRowNum * sideLength
 
-	for colNum := 0; colNum < boardWidth; colNum++ {
-		if c, ok := b.cells[vec2d{0, colNum}]; ok && c.val == 1 {
-			b.p = &player{cell: c, facing: right}
-			break
+		for faceColNum := range faceGrid[faceRowNum] {
+			boardColNum := faceColNum * sideLength
+			if boardColNum >= len(input[boardRowNum]) || input[boardRowNum][boardColNum] == ' ' {
+				continue
+			}
+
+			newFace := NewFace(faceId, boardRowNum, boardColNum, sideLength)
+			for row := 0; row < sideLength; row++ {
+				for col := 0; col < sideLength; col++ {
+					cellRow, cellCol := newFace.originRow+row, newFace.originCol+col
+					newCell := cell{
+						face: newFace,
+						row:  cellRow,
+						col:  cellCol,
+						val:  input[cellRow][cellCol],
+					}
+					newFace.cells[row][col] = &newCell
+				}
+			}
+
+			faces[faceId] = newFace
+			faceId++
+			faceGrid[faceRowNum][faceColNum] = newFace
 		}
 	}
 
-	instruction := input[boardHeight+1]
+	// Set cell neighbors within faces
+	for _, f := range faces {
+		for _, row := range f.cells {
+			for colNum, rightCell := range row[1:] {
+				c := row[colNum]
+				if c.neighbors[right] != nil || rightCell.neighbors[left] != nil {
+					panic("Overwriting neighbor config")
+				}
+				c.neighbors[right], rightCell.neighbors[left] = rightCell, c
+			}
+		}
+		for rowNum, downRow := range f.cells[1:] {
+			for colNum, downCell := range downRow {
+				c := f.cells[rowNum][colNum]
+				if c.neighbors[down] != nil || downCell.neighbors[up] != nil {
+					panic("Overwriting neighbor config")
+				}
+				c.neighbors[down], downCell.neighbors[up] = downCell, c
+			}
+		}
+	}
+
+	// Set face neighbors based on board before folding
+	for _, fRow := range faceGrid {
+		for colNum := range fRow[1:] {
+			if fRow[colNum] != nil && fRow[colNum+1] != nil {
+				connectSides(fRow[colNum], fRow[colNum+1], right, left)
+			}
+		}
+	}
+	for rowNum, fRow := range faceGrid[1:] {
+		for colNum, f := range fRow {
+			if faceGrid[rowNum][colNum] != nil && f != nil {
+				connectSides(faceGrid[rowNum][colNum], f, down, up)
+			}
+		}
+	}
+
+	// Finally, fold the cube and set new neighbors
+	// (6 faces)*(4 edges per face) = 24 edges forms 12 pairs
+	// 5 pairs are handled in the last section, 7 remain
+	// Strategy: Repeatedly check for L-shapes and fold them
+	for disconnectedPairs := 7; disconnectedPairs > 0; {
+		for _, f := range faces {
+			for side := right; side <= up; side++ {
+				if f.neighbors[side] != nil {
+					continue
+				}
+
+				next, prev := side.next(), side.prev()
+				if mid := f.neighbors[next]; mid != nil { // clockwise search
+					next = mid.entrySide(f).next()
+					if fold := mid.neighbors[next]; fold != nil {
+						next = fold.entrySide(mid).next()
+						if fold.neighbors[next] == nil {
+							connectSides(f, fold, side, next)
+							disconnectedPairs--
+						}
+					}
+				} else if mid := f.neighbors[prev]; mid != nil { // anticlockwise search
+					prev = mid.entrySide(f).prev()
+					if fold := mid.neighbors[prev]; fold != nil {
+						prev = fold.entrySide(mid).prev()
+						if fold.neighbors[prev] == nil {
+							connectSides(f, fold, side, prev)
+							disconnectedPairs--
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return faces
+}
+
+func parseInstruction(instruction string) ([]int, []byte) {
 	moves, turns := make([]int, 0), make([]byte, 0)
 	for len(instruction) > 0 {
 		nextTurn := strings.IndexAny(instruction, "LR")
@@ -337,19 +306,47 @@ func parseInput(input []string) (*board, []int, []byte) {
 			instruction = instruction[nextTurn+1:]
 		}
 	}
+	return moves, turns
+}
 
-	return b, moves, turns
+func parseInput(input []string) *board {
+	var emptyLine int
+	for lineNum, line := range input {
+		if line == "" {
+			emptyLine = lineNum
+			break
+		}
+	}
+
+	b := new(board)
+	b.faces = parseCube(input[:emptyLine])
+	b.moves, b.turns = parseInstruction(input[emptyLine+1])
+
+	for colNum := 0; colNum < len(b.faces[0].cells); colNum++ {
+		if startingCell := b.faces[0].cells[0][colNum]; startingCell.val == '.' {
+			b.p = &player{cell: startingCell, direction: right}
+			break
+		}
+	}
+
+	return b
+}
+
+func readInput() []string {
+	lines := make([]string, 0)
+	scanner := bufio.NewScanner(os.Stdin)
+	for scanner.Scan() {
+		lines = append(lines, scanner.Text())
+	}
+	if scanner.Err() != nil {
+		panic(scanner.Err())
+	}
+	return lines
 }
 
 func main() {
 	input := readInput()
-	cube, moves, turns := parseInput(input)
-
-	for _, c := range cube.cells {
-		if c.up == nil || c.down == nil || c.right == nil || c.left == nil {
-			fmt.Println(*c)
-		}
-	}
-	cube.run(moves, turns)
+	cube := parseInput(input)
+	cube.run()
 	fmt.Println(cube.p.password())
 }
