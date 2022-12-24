@@ -99,12 +99,12 @@ type void struct{}
 var empty void
 
 func (m *mountain) traverse() uint {
-	queued := make(map[flag]void)
-
-	queue := make([]flag, 0, 1<<20)
+	queue := make([]flag, 0, 1<<12)
 	// Assume we enter the storm on first turn - maybe not actually safe to do?
 	queue = append(queue, flag{0, 0, 1})
 
+	queued := make([]bool, m.height*m.width)
+	var currMin uint = 1
 	for len(queue) > 0 {
 		currFlag := queue[0]
 		queue = queue[1:]
@@ -113,12 +113,21 @@ func (m *mountain) traverse() uint {
 			return currFlag.minute + 1
 		}
 
+		if currFlag.minute != currMin {
+			for i := range queued {
+				queued[i] = false
+			}
+			currMin = currFlag.minute
+		}
+
 		for _, nextFlag := range currFlag.next(m.height, m.width) {
 			if m.clear(nextFlag) {
-				if _, ok := queued[nextFlag]; !ok {
+				key := m.width*nextFlag.y + nextFlag.x
+				if !queued[key] {
 					queue = append(queue, nextFlag)
-					queued[nextFlag] = empty
+					queued[key] = true
 				}
+
 			}
 		}
 

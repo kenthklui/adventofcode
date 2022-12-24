@@ -125,17 +125,16 @@ type void struct{}
 var empty void
 
 func (m *mountain) traverse(startTime uint, forward bool) uint {
-	queued := make(map[uint]void)
-	queue := make([]flag, 0, 1<<20)
-
-	var startX, startY, endX, endY uint
-	if forward {
-		startX, startY, endX, endY = 1, 0, m.width-2, m.height-1
-	} else {
-		startX, startY, endX, endY = m.width-2, m.height-1, 1, 0
+	var startX, startY, endX, endY uint = 1, 0, m.width - 2, m.height - 1
+	if !forward {
+		startX, startY, endX, endY = endX, endY, startX, startY
 	}
+
+	queue := make([]flag, 0, 1<<20)
 	queue = append(queue, flag{startX, startY, startTime})
 
+	queued := make([]bool, m.height*m.width)
+	currMin := startTime
 	for len(queue) > 0 {
 		currFlag := queue[0]
 		queue = queue[1:]
@@ -144,13 +143,21 @@ func (m *mountain) traverse(startTime uint, forward bool) uint {
 			return currFlag.minute + 1
 		}
 
+		if currFlag.minute != currMin {
+			for i := range queued {
+				queued[i] = false
+			}
+			currMin = currFlag.minute
+		}
+
 		for _, nextFlag := range currFlag.next(m.height, m.width) {
 			if m.clear(nextFlag) {
-				key := nextFlag.key(m.height, m.width)
-				if _, ok := queued[key]; !ok {
+				key := m.width*nextFlag.y + nextFlag.x
+				if !queued[key] {
 					queue = append(queue, nextFlag)
-					queued[key] = empty
+					queued[key] = true
 				}
+
 			}
 		}
 
@@ -186,9 +193,9 @@ func main() {
 	input := readInput()
 	mount := parseInput(input)
 
-	done1st := mount.traverse(0, true)
-	done2nd := mount.traverse(done1st, false)
-	done3rd := mount.traverse(done2nd, true)
+	done := mount.traverse(0, true)
+	done = mount.traverse(done, false)
+	done = mount.traverse(done, true)
 
-	fmt.Println(done3rd)
+	fmt.Println(done)
 }
