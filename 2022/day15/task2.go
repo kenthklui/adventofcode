@@ -21,85 +21,39 @@ func intAbs(a int) int {
 	return a
 }
 
-type sensor struct {
-	x, y, bx, by int
-}
-
-func (s sensor) manhattan() int {
-	x1, x2 := intMinMax(s.x, s.bx)
-	y1, y2 := intMinMax(s.y, s.by)
+func manhattan(x1, y1, x2, y2 int) int {
+	x1, x2 = intMinMax(x1, x2)
+	y1, y2 = intMinMax(y1, y2)
 	return x2 - x1 + y2 - y1
 }
 
-type beaconRange struct {
-	start, end int
+type sensor struct {
+	x, y, bx, by, detectRange int
 }
 
-func (br1 beaconRange) greaterThan(br2 beaconRange) bool { return br1.start > br2.end+1 }
-func (br1 beaconRange) lesserThan(br2 beaconRange) bool  { return br1.end+1 < br2.start }
-func (br1 beaconRange) overlap(br2 beaconRange) bool {
-	return br1.start <= br2.end+1 && br2.start <= br1.end+1
-}
+type sensorGroup []*sensor
 
-type beacons struct {
-	ranges []beaconRange
-}
-
-func NewBeacons() *beacons {
-	return &beacons{make([]beaconRange, 0)}
-}
-
-func (b *beacons) addRange(newRange beaconRange) {
-	n := len(b.ranges)
-	if n == 0 {
-		b.ranges = append(b.ranges, newRange)
-		return
+func (s *sensor) detectionRange() int {
+	if s.detectRange == 0 {
+		s.detectRange = manhattan(s.x, s.y, s.bx, s.by)
 	}
+	return s.detectRange
+}
 
-	if newRange.greaterThan(b.ranges[n-1]) { // larger than everything
-		b.ranges = append(b.ranges, newRange)
-		return
-	} else if newRange.lesserThan(b.ranges[0]) { // smaller than everything
-		b.ranges = append([]beaconRange{newRange}, b.ranges...)
-		return
-	}
-
-	var overlapStartIndex, overlapEndIndex int
-	for i, brs := range b.ranges {
-		if newRange.overlap(brs) {
-			overlapStartIndex, overlapEndIndex = i, i
-			for _, bre := range b.ranges[i+1:] {
-				if newRange.overlap(bre) {
-					overlapEndIndex++
-				} else {
-					break
-				}
-			}
-			break
+func (sg sensorGroup) inRange(x, y int) bool {
+	for _, s := range sg {
+		if manhattan(s.x, s.y, x, y) <= s.detectionRange() {
+			return true
 		}
 	}
-
-	if firstStart := b.ranges[overlapStartIndex].start; newRange.start > firstStart {
-		newRange.start = firstStart
-	}
-	if lastEnd := b.ranges[overlapEndIndex].end; newRange.end < lastEnd {
-		newRange.end = lastEnd
-	}
-
-	newRanges := append(b.ranges[:overlapStartIndex], newRange)
-	newRanges = append(newRanges, b.ranges[overlapEndIndex+1:]...)
-	b.ranges = newRanges
+	return false
 }
 
-func buildMap(sensors []sensor, minVal, maxVal int) []*beacons {
-	bm := make([]*beacons, maxVal-minVal+1)
-	for i := range bm {
-		bm[i] = NewBeacons()
-	}
-
-	for _, s := range sensors {
-		man := s.manhattan()
-		for dy := -man; dy <= man; dy++ {
+func (sg sensorGroup) findBeacon(minVal, maxVal int) (int, int) {
+	// Check edge of sensors
+	for _, s := range sg {
+		sensorEdge := s.detectionRange() + 1
+		for dy := -sensorEdge; dy <= sensorEdge; dy++ {
 			y := s.y + dy
 			if y < minVal {
 				continue
@@ -107,29 +61,13 @@ func buildMap(sensors []sensor, minVal, maxVal int) []*beacons {
 				break
 			}
 
-			dx := man - intAbs(dy)
-			_, startX := intMinMax(s.x-dx, 0)
-			endX, _ := intMinMax(s.x+dx, maxVal)
-
-			bm[y-minVal].addRange(beaconRange{startX, endX})
-		}
-	}
-
-	return bm
-}
-
-func findBeacon(sensors []sensor, minVal, maxVal int) (int, int) {
-	for i, br := range buildMap(sensors, minVal, maxVal) {
-		x := 0
-		for _, r := range br.ranges {
-			if x < r.start {
-				return x, i + minVal
+			dx := sensorEdge - intAbs(dy)
+			if x := s.x - dy; x >= 0 && !sg.inRange(x, y) {
+				return x, y
 			}
-
-			x = r.end + 1
-		}
-		if x <= maxVal {
-			return x, i + minVal
+			if x := s.x + dx; x <= maxVal && !sg.inRange(x, y) {
+				return x, y
+			}
 		}
 	}
 
@@ -150,8 +88,8 @@ func readInput() []string {
 	return lines
 }
 
-func parseInput(input []string) []sensor {
-	sensors := make([]sensor, 0, len(input))
+func parseInput(input []string) sensorGroup {
+	sg := make(sensorGroup, 0, len(input))
 	for _, line := range input {
 		var s sensor
 		n, err := fmt.Sscanf(line, "Sensor at x=%d, y=%d: closest beacon is at x=%d, y=%d",
@@ -162,15 +100,15 @@ func parseInput(input []string) []sensor {
 			panic(err)
 		}
 
-		sensors = append(sensors, s)
+		sg = append(sg, &s)
 	}
-	return sensors
+	return sg
 }
 
 func main() {
 	input := readInput()
-	sensors := parseInput(input)
-	x, y := findBeacon(sensors, 0, 4000000)
+	sg := parseInput(input)
+	x, y := sg.findBeacon(0, 4000000)
 
 	if x != -1 && y != -1 {
 		fmt.Println(x*4000000 + y)
