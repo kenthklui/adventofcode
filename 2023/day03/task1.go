@@ -17,10 +17,10 @@ type partNum struct {
 	Valid bool
 }
 
-func find(input []string) int {
+func partNumSum(input []string) int {
 	intRegex := regexp.MustCompile(`\d+`)
-	partsMap := make(map[coordinate]*partNum)
 	partsList := make([]*partNum, 0)
+	partsMap := make(map[coordinate]*partNum)
 
 	// Find and mark numbers
 	for lineNum, line := range input {
@@ -28,7 +28,6 @@ func find(input []string) int {
 		for _, match := range matches {
 			if value, err := strconv.Atoi(line[match[0]:match[1]]); err == nil {
 				pn := partNum{value, false}
-
 				partsList = append(partsList, &pn)
 				for index := match[0]; index < match[1]; index++ {
 					partsMap[coordinate{lineNum, index}] = &pn
@@ -43,26 +42,8 @@ func find(input []string) int {
 	for lineNum, line := range input {
 		for index, r := range line {
 			if r != '.' && (r < '0' || r > '9') {
-				lineMin := lineNum - 1
-				if lineMin < 0 {
-					lineMin++
-				}
-				lineMax := lineNum + 1
-				if lineMax == len(input) {
-					lineMax--
-				}
-
-				indexMin := index - 1
-				if indexMin < 0 {
-					indexMin++
-				}
-				indexMax := index + 1
-				if indexMax == len(input) {
-					indexMax--
-				}
-
-				for l := lineMin; l <= lineMax; l++ {
-					for i := indexMin; i <= indexMax; i++ {
+				for l := lineNum - 1; l <= lineNum+1; l++ {
+					for i := index - 1; i <= index+1; i++ {
 						if pn, ok := partsMap[coordinate{l, i}]; ok {
 							pn.Valid = true
 						}
@@ -78,11 +59,10 @@ func find(input []string) int {
 			sum += pn.Value
 		}
 	}
-
 	return sum
 }
 
 func main() {
 	input := util.StdinReadlines()
-	fmt.Println(find(input))
+	fmt.Println(partNumSum(input))
 }

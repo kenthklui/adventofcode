@@ -17,10 +17,9 @@ type partNum struct {
 	Valid bool
 }
 
-func find(input []string) int {
+func gearRatioSum(input []string) int {
 	intRegex := regexp.MustCompile(`\d+`)
 	partsMap := make(map[coordinate]*partNum)
-	partsList := make([]*partNum, 0)
 
 	// Find and mark numbers
 	for lineNum, line := range input {
@@ -28,8 +27,6 @@ func find(input []string) int {
 		for _, match := range matches {
 			if value, err := strconv.Atoi(line[match[0]:match[1]]); err == nil {
 				pn := partNum{value, false}
-
-				partsList = append(partsList, &pn)
 				for index := match[0]; index < match[1]; index++ {
 					partsMap[coordinate{lineNum, index}] = &pn
 				}
@@ -40,31 +37,13 @@ func find(input []string) int {
 	}
 
 	// Find and handle gears
-	gearRatioSum := 0
+	sum := 0
 	for lineNum, line := range input {
 		for index, r := range line {
 			if r == '*' {
-				lineMin := lineNum - 1
-				if lineMin < 0 {
-					lineMin++
-				}
-				lineMax := lineNum + 1
-				if lineMax == len(input) {
-					lineMax--
-				}
-
-				indexMin := index - 1
-				if indexMin < 0 {
-					indexMin++
-				}
-				indexMax := index + 1
-				if indexMax == len(input) {
-					indexMax--
-				}
-
 				neighborParts := make(map[*partNum]int)
-				for l := lineMin; l <= lineMax; l++ {
-					for i := indexMin; i <= indexMax; i++ {
+				for l := lineNum - 1; l <= lineNum+1; l++ {
+					for i := index - 1; i <= index+1; i++ {
 						if pn, ok := partsMap[coordinate{l, i}]; ok {
 							neighborParts[pn] = 0
 						}
@@ -75,16 +54,15 @@ func find(input []string) int {
 					for pn := range neighborParts {
 						gearRatio *= pn.Value
 					}
-					gearRatioSum += gearRatio
+					sum += gearRatio
 				}
 			}
 		}
 	}
-
-	return gearRatioSum
+	return sum
 }
 
 func main() {
 	input := util.StdinReadlines()
-	fmt.Println(find(input))
+	fmt.Println(gearRatioSum(input))
 }
