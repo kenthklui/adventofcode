@@ -9,30 +9,26 @@ import (
 	"github.com/kenthklui/adventofcode/util"
 )
 
-type iMap [3]int
-type iMaps []iMap
-
-// Assume all map ranges are distinct and non overlapping
-func (maps iMaps) Len() int           { return len(maps) }
-func (maps iMaps) Less(i, j int) bool { return maps[i][1] < maps[j][1] }
-func (maps iMaps) Swap(i, j int)      { maps[i], maps[j] = maps[j], maps[i] }
-
 type seedRange [2]int
 type seedRanges []seedRange
 
-// Assume all seed ranges are distinct and non overlapping
+// Assume all seed ranges are distinct and non overlapping and therefore sortable
 func (srs seedRanges) Len() int           { return len(srs) }
 func (srs seedRanges) Less(i, j int) bool { return srs[i][0] < srs[j][0] }
 func (srs seedRanges) Swap(i, j int)      { srs[i], srs[j] = srs[j], srs[i] }
 
-type converter struct {
-	maps iMaps
-}
+type iMap [3]int
+type converter []iMap
 
-func (c *converter) convert(input int) (int, int) {
+// Assume all map ranges are distinct and non overlapping and therefore sortable
+func (c converter) Len() int           { return len(c) }
+func (c converter) Less(i, j int) bool { return c[i][1] < c[j][1] }
+func (c converter) Swap(i, j int)      { c[i], c[j] = c[j], c[i] }
+
+func (c converter) convert(input int) (int, int) {
 	output, increment := input, -1
 
-	for _, m := range c.maps {
+	for _, m := range c {
 		diff := input - m[1]
 		if diff < 0 {
 			increment = -diff
@@ -52,7 +48,7 @@ func (c *converter) convert(input int) (int, int) {
 type production struct {
 	ranges seedRanges
 	// SeedToSoil, SoilToFert, FertToWater, WaterToLight, LightToTemp, TempToHumid, HumidToLoc
-	converters [7]*converter
+	converters [7]converter
 }
 
 func (p production) getMinLocation(limit int) int {
@@ -105,10 +101,10 @@ func parse(input []string) production {
 	}
 	sort.Sort(ranges)
 
-	var converters [7]*converter
+	var converters [7]converter
 	lineNum := 3
 	for i := range converters {
-		maps := make(iMaps, 0)
+		converters[i] = make(converter, 0)
 		for _, line := range input[lineNum:] {
 			if line == "" {
 				break
@@ -120,12 +116,11 @@ func parse(input []string) production {
 					panic(err)
 				}
 			}
-			maps = append(maps, im)
+			converters[i] = append(converters[i], im)
 		}
-		lineNum += len(maps) + 2
+		lineNum += len(converters[i]) + 2
 
-		sort.Sort(maps)
-		converters[i] = &converter{maps}
+		sort.Sort(converters[i])
 	}
 
 	return production{ranges, converters}
