@@ -26,13 +26,13 @@ type location struct {
 	Left, Right *location
 }
 
-type cycle struct {
-	head, length, zPos int
-}
-
-type signature struct {
+type locationInstruction struct {
 	loc              *location
 	instructionIndex int
+}
+
+type cycle struct {
+	head, length, zPos int
 }
 
 func traverse(instruction string, network map[string]*location) int {
@@ -47,9 +47,8 @@ func traverse(instruction string, network map[string]*location) int {
 	for _, source := range sources {
 		steps := 0
 		curr := source
-		travelled := make(map[signature]int)
-
-		var head, cycleLength, zSteps int
+		travelled := make(map[locationInstruction]int)
+		var head, length, zSteps int
 		for {
 			instructionIndex := steps % len(instruction)
 			switch instruction[instructionIndex] {
@@ -60,38 +59,38 @@ func traverse(instruction string, network map[string]*location) int {
 			}
 			steps++
 
-			sig := signature{curr, instructionIndex}
-			if lastSeen, found := travelled[sig]; found {
-				head = lastSeen
-				cycleLength = steps - lastSeen
-				break
-			} else {
-				travelled[sig] = steps
-			}
-
 			if curr.Name[2] == 'Z' {
 				// For whatever reason, assume each ghost only visits a single Z node in a cycle?
 				zSteps = steps
 			}
+
+			key := locationInstruction{curr, instructionIndex}
+			if lastSeen, found := travelled[key]; found {
+				head = lastSeen
+				length = steps - lastSeen
+				break
+			} else {
+				travelled[key] = steps
+			}
 		}
-		cycles = append(cycles, cycle{head, cycleLength, zSteps - head})
+		cycles = append(cycles, cycle{head, length, zSteps - head})
 	}
 
 	// The default input is a special case that can be solved by taking LCM of all the zSteps
 	// This solution addresses when Zs don't all magically appear at the cycle length
-	cycleLen, curr := cycles[0].length, cycles[0].head+cycles[0].zPos
+	increment, steps := cycles[0].length, cycles[0].head+cycles[0].zPos
 	for _, c := range cycles[1:] {
 		for {
-			if ghostOnZ := ((curr-c.head)%c.length == c.zPos); ghostOnZ {
-				cycleLen = lcm(cycleLen, c.length)
+			// This can get stuck in an infinite loop if cycles don't agree
+			if ghostOnZ := ((steps-c.head)%c.length == c.zPos); ghostOnZ {
+				increment = lcm(increment, c.length)
 				break
 			} else {
-				curr += cycleLen
+				steps += increment
 			}
 		}
 	}
-
-	return curr
+	return steps
 }
 
 func parseNetwork(input []string) map[string]*location {
