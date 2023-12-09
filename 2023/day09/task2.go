@@ -29,7 +29,7 @@ func history(intLine []int) int {
 	order := 1
 	for ; order < len(intLine); order++ {
 		allZero := true
-		for i := order; i < len(intLine); i++ {
+		for i := order; i <= order+1; i++ {
 			sum := 0
 			for j := 0; j <= order; j++ {
 				sum += intLine[i-j] * binomial(order, j)
