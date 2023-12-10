@@ -5,19 +5,25 @@ import (
 	"strconv"
 )
 
+var intRegex = regexp.MustCompile(`-?\d+`)
+
+func ParseLineInts(line string) []int {
+	matches := intRegex.FindAllString(line, -1)
+	ints := make([]int, 0, len(matches))
+	for _, match := range matches {
+		if n, err := strconv.Atoi(match); err == nil {
+			ints = append(ints, n)
+		} else {
+			panic(err)
+		}
+	}
+	return ints
+}
+
 func ParseInts(input []string) [][]int {
 	ints := make([][]int, len(input))
-	intRegex := regexp.MustCompile(`-?\d+`)
 	for i, line := range input {
-		matches := intRegex.FindAllString(line, -1)
-		ints[i] = make([]int, 0, len(matches))
-		for _, match := range matches {
-			if n, err := strconv.Atoi(match); err == nil {
-				ints[i] = append(ints[i], n)
-			} else {
-				panic(err)
-			}
-		}
+		ints[i] = ParseLineInts(line)
 	}
 	return ints
 }
