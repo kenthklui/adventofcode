@@ -8,11 +8,9 @@ import (
 )
 
 type rockMap struct {
-	rm [][]rune
-
-	rollMemo, rotateMemo map[string]string
-	sig                  string
-	gridInvalid          bool
+	rm          [][]rune
+	sig         string
+	gridInvalid bool
 }
 
 func makeMap(input []string) *rockMap {
@@ -26,8 +24,6 @@ func makeMap(input []string) *rockMap {
 
 	rm := &rockMap{
 		rm:          grid,
-		rollMemo:    make(map[string]string),
-		rotateMemo:  make(map[string]string),
 		gridInvalid: false,
 	}
 	rm.updateSig()
@@ -115,32 +111,10 @@ func (rm *rockMap) rotate() {
 	rm.updateSig()
 }
 
-func (rm *rockMap) cachedRoll() {
-	oldSig := rm.sig
-	if rolled, found := rm.rollMemo[oldSig]; found {
-		rm.sig = rolled
-		rm.gridInvalid = true
-	} else {
-		rm.roll()
-		rm.rollMemo[oldSig] = rm.sig
-	}
-}
-
-func (rm *rockMap) cachedRotate() {
-	oldSig := rm.sig
-	if rotated, found := rm.rotateMemo[oldSig]; found {
-		rm.sig = rotated
-		rm.gridInvalid = true
-	} else {
-		rm.rotate()
-		rm.rotateMemo[oldSig] = rm.sig
-	}
-}
-
 func (rm *rockMap) cycle() {
 	for i := 0; i < 4; i++ {
-		rm.cachedRoll()
-		rm.cachedRotate()
+		rm.roll()
+		rm.rotate()
 	}
 }
 
@@ -180,19 +154,9 @@ func (rm *rockMap) load() int {
 	return sum
 }
 
-func (rm *rockMap) printout() {
-	rm.restoreFromSig()
-	for _, line := range rm.rm {
-		fmt.Println(string(line))
-	}
-}
-
 func main() {
 	input := util.StdinReadlines()
 	rm := makeMap(input)
-
-	cycles := 1000000000
-	rm.runCycles(cycles)
-
+	rm.runCycles(1000000000)
 	fmt.Println(rm.load())
 }
