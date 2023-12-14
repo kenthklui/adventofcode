@@ -57,40 +57,22 @@ func (rm *rockMap) restoreFromSig() {
 func (rm *rockMap) roll() {
 	rm.restoreFromSig()
 	for col := range rm.rm[0] {
-		startRow := 0
-		rockCount := 0
+		openSpot := -1
 		for row := range rm.rm {
 			switch rm.rm[row][col] {
 			case '.':
-				continue
-			case 'O':
-				rockCount++
-				continue
-			case '#':
-				endRow := row
-				for i := startRow; i < endRow; i++ {
-					if rockCount > 0 {
-						rm.rm[i][col] = 'O'
-						rockCount--
-					} else {
-						rm.rm[i][col] = '.'
-					}
+				if openSpot < 0 {
+					openSpot = row
 				}
-
-				startRow = row + 1
+			case 'O':
+				if openSpot >= 0 {
+					rm.rm[openSpot][col], rm.rm[row][col] = 'O', '.'
+					openSpot++
+				}
+			case '#':
+				openSpot = -1
 			default:
 				panic("Invalid map char")
-			}
-		}
-
-		if rockCount > 0 {
-			for i := startRow; i < len(rm.rm); i++ {
-				if rockCount > 0 {
-					rm.rm[i][col] = 'O'
-					rockCount--
-				} else {
-					rm.rm[i][col] = '.'
-				}
 			}
 		}
 	}
@@ -99,15 +81,13 @@ func (rm *rockMap) roll() {
 
 func (rm *rockMap) rotate() {
 	rm.restoreFromSig()
-	width := len(rm.rm[0])
-	rotated := make([][]rune, width)
-	for row := range rotated {
-		rotated[row] = make([]rune, len(rm.rm))
-		for col := range rotated[row] {
-			rotated[row][col] = rm.rm[width-1-col][row]
+	mid, max := len(rm.rm)/2, len(rm.rm)-1
+	for x := 0; x < mid; x++ {
+		for y := 0; y < mid; y++ {
+			rm.rm[x][y], rm.rm[y][max-x], rm.rm[max-x][max-y], rm.rm[max-y][x] =
+				rm.rm[max-y][x], rm.rm[x][y], rm.rm[y][max-x], rm.rm[max-x][max-y]
 		}
 	}
-	rm.rm = rotated
 	rm.updateSig()
 }
 

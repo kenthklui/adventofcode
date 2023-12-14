@@ -19,40 +19,22 @@ func makeMap(input []string) [][]rune {
 
 func rollNorth(rockMap [][]rune) [][]rune {
 	for col := range rockMap[0] {
-		startRow := 0
-		rockCount := 0
+		openSpot := -1
 		for row := range rockMap {
 			switch rockMap[row][col] {
 			case '.':
-				continue
-			case 'O':
-				rockCount++
-				continue
-			case '#':
-				endRow := row
-				for i := startRow; i < endRow; i++ {
-					if rockCount > 0 {
-						rockMap[i][col] = 'O'
-						rockCount--
-					} else {
-						rockMap[i][col] = '.'
-					}
+				if openSpot < 0 {
+					openSpot = row
 				}
-
-				startRow = row + 1
+			case 'O':
+				if openSpot >= 0 {
+					rockMap[openSpot][col], rockMap[row][col] = 'O', '.'
+					openSpot++
+				}
+			case '#':
+				openSpot = -1
 			default:
 				panic("Invalid map char")
-			}
-		}
-
-		if rockCount > 0 {
-			for i := startRow; i < len(rockMap); i++ {
-				if rockCount > 0 {
-					rockMap[i][col] = 'O'
-					rockCount--
-				} else {
-					rockMap[i][col] = '.'
-				}
 			}
 		}
 	}
