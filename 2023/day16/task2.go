@@ -25,15 +25,12 @@ func (v vec) inBounds(width, height int) bool {
 	return v.x >= 0 && v.y >= 0 && v.x < width && v.y < height
 }
 
-type directions map[vec]void
-
 type cave struct {
 	width, height int
 	layout        []string
 
 	energized [][]bool
 	splitted  map[vec]void
-	reflected map[vec]directions
 }
 
 func makeCave(input []string) *cave {
@@ -49,26 +46,10 @@ func makeCave(input []string) *cave {
 		layout:    input,
 		energized: e,
 		splitted:  make(map[vec]void),
-		reflected: make(map[vec]directions),
 	}
 }
 
-func (c *cave) mirrorUsed(loc, dir vec) bool {
-	if dirs, exists := c.reflected[loc]; exists {
-		if _, used := dirs[dir]; used {
-			return true
-		} else {
-			c.reflected[loc][dir] = nul
-			return false
-		}
-	} else {
-		c.reflected[loc] = make(map[vec]void)
-		c.reflected[loc][dir] = nul
-		return false
-	}
-}
-
-func (c *cave) splitUsed(loc vec) bool {
+func (c *cave) splitterUsed(loc vec) bool {
 	_, used := c.splitted[loc]
 	if !used {
 		c.splitted[loc] = nul
@@ -84,11 +65,6 @@ func (c *cave) sendBeam(origin, dir vec) {
 		case '.':
 			continue
 		case '/':
-			if c.mirrorUsed(loc, dir) {
-				blocked = true
-				break
-			}
-
 			switch dir {
 			case up:
 				dir = right
@@ -100,11 +76,6 @@ func (c *cave) sendBeam(origin, dir vec) {
 				dir = up
 			}
 		case '\\':
-			if c.mirrorUsed(loc, dir) {
-				blocked = true
-				break
-			}
-
 			switch dir {
 			case up:
 				dir = left
@@ -117,7 +88,7 @@ func (c *cave) sendBeam(origin, dir vec) {
 			}
 		case '|':
 			if dir == left || dir == right {
-				if !c.splitUsed(loc) {
+				if !c.splitterUsed(loc) {
 					c.sendBeam(loc, up)
 					c.sendBeam(loc, down)
 				}
@@ -125,7 +96,7 @@ func (c *cave) sendBeam(origin, dir vec) {
 			}
 		case '-':
 			if dir == up || dir == down {
-				if !c.splitUsed(loc) {
+				if !c.splitterUsed(loc) {
 					c.sendBeam(loc, left)
 					c.sendBeam(loc, right)
 				}
@@ -154,7 +125,6 @@ func (c *cave) reset() {
 		}
 	}
 	c.splitted = make(map[vec]void)
-	c.reflected = make(map[vec]directions)
 }
 
 func (c *cave) maxEnergized() int {
