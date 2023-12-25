@@ -7,6 +7,10 @@ import (
 	"github.com/kenthklui/adventofcode/util"
 )
 
+type void struct{}
+
+var nul void
+
 type node struct {
 	name      string
 	edges     map[*edge]*node
@@ -14,6 +18,8 @@ type node struct {
 }
 
 func newNode(name string) *node { return &node{name: name, edges: make(map[*edge]*node)} }
+
+type nodeMap map[*node]void
 
 type edge struct {
 	travelled bool
@@ -36,7 +42,7 @@ func (g *graph) resetEdges() {
 	}
 }
 
-func (g *graph) removeShortestPath(source, dest *node) bool {
+func (g *graph) bfs(source *node, dest *node) (bool, nodeMap) {
 	type queueItem struct {
 		e    *edge
 		n    *node
@@ -46,11 +52,13 @@ func (g *graph) removeShortestPath(source, dest *node) bool {
 	queue := make([]*queueItem, 0, len(g.nodes))
 	queue = append(queue, &queueItem{n: source})
 
+	reachedNodes := make(nodeMap)
 	found := false
 	for len(queue) > 0 {
 		curr := queue[0]
 		queue = queue[1:]
 
+		reachedNodes[curr.n] = nul
 		if curr.n == dest {
 			for itr := curr; itr.e != nil; itr = itr.prev {
 				itr.e.travelled = true
@@ -68,41 +76,54 @@ func (g *graph) removeShortestPath(source, dest *node) bool {
 		}
 	}
 	g.resetNodes()
-	return found
+	return found, reachedNodes
 }
 
 func (g *graph) cutPaths(source, dest *node, pathNum int) bool {
 	complete := true
 	for i := 0; i < pathNum; i++ {
-		if !g.removeShortestPath(source, dest) {
+		if found, _ := g.bfs(source, dest); !found {
 			complete = false
 			break
 		}
 	}
-	g.resetEdges()
 	return complete
 }
 
-func (g *graph) split(cuts int) ([]*node, []*node) {
-	g1, g2 := []*node{}, []*node{}
+func (g *graph) split(cuts int) (nodeMap, nodeMap) {
+	g1, g2 := make(nodeMap), make(nodeMap)
 
 	var source *node
 	for _, n := range g.nodes {
 		source = n
 		break
 	}
-	g1 = append(g1, source)
+	g1[source] = nul
 
 	for _, dest := range g.nodes {
 		if source == dest {
 			continue
 		}
+		_, ok1 := g1[dest]
+		_, ok2 := g2[dest]
+		if ok1 || ok2 {
+			continue
+		}
 
 		if g.cutPaths(source, dest, cuts+1) {
-			g1 = append(g1, dest)
+			g1[dest] = nul
 		} else {
-			g2 = append(g2, dest)
+			// Use disconnected graph to categorize as many nodes as possible
+			_, g1nodes := g.bfs(source, nil)
+			for n := range g1nodes {
+				g1[n] = nul
+			}
+			_, g2nodes := g.bfs(dest, nil)
+			for n := range g2nodes {
+				g2[n] = nul
+			}
 		}
+		g.resetEdges()
 	}
 	return g1, g2
 }
