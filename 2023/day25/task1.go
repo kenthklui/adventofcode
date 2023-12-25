@@ -15,6 +15,7 @@ type node struct {
 	name      string
 	edges     map[*edge]*node
 	travelled bool
+	group     int
 }
 
 func newNode(name string) *node { return &node{name: name, edges: make(map[*edge]*node)} }
@@ -42,23 +43,24 @@ func (g *graph) resetEdges() {
 	}
 }
 
-func (g *graph) bfs(source *node, dest *node) (bool, nodeMap) {
+func (g *graph) bfs(source, dest *node) bool {
 	type queueItem struct {
 		e    *edge
 		n    *node
 		prev *queueItem
 	}
 
-	queue := make([]*queueItem, 0, len(g.nodes))
+	queue := make([]*queueItem, 0)
 	queue = append(queue, &queueItem{n: source})
 
-	reachedNodes := make(nodeMap)
 	found := false
 	for len(queue) > 0 {
 		curr := queue[0]
 		queue = queue[1:]
 
-		reachedNodes[curr.n] = nul
+		if curr.prev != nil {
+			curr.n.group = curr.prev.n.group
+		}
 		if curr.n == dest {
 			for itr := curr; itr.e != nil; itr = itr.prev {
 				itr.e.travelled = true
@@ -76,13 +78,13 @@ func (g *graph) bfs(source *node, dest *node) (bool, nodeMap) {
 		}
 	}
 	g.resetNodes()
-	return found, reachedNodes
+	return found
 }
 
 func (g *graph) cutPaths(source, dest *node, pathNum int) bool {
 	complete := true
 	for i := 0; i < pathNum; i++ {
-		if found, _ := g.bfs(source, dest); !found {
+		if !g.bfs(source, dest) {
 			complete = false
 			break
 		}
@@ -90,42 +92,38 @@ func (g *graph) cutPaths(source, dest *node, pathNum int) bool {
 	return complete
 }
 
-func (g *graph) split(cuts int) (nodeMap, nodeMap) {
-	g1, g2 := make(nodeMap), make(nodeMap)
-
+func (g *graph) split(cuts int) (int, int) {
 	var source *node
 	for _, n := range g.nodes {
 		source = n
 		break
 	}
-	g1[source] = nul
+	source.group = 1
 
 	for _, dest := range g.nodes {
 		if source == dest {
 			continue
 		}
-		_, ok1 := g1[dest]
-		_, ok2 := g2[dest]
-		if ok1 || ok2 {
+		if dest.group > 0 {
 			continue
 		}
 
-		if g.cutPaths(source, dest, cuts+1) {
-			g1[dest] = nul
-		} else {
+		if !g.cutPaths(source, dest, cuts+1) {
 			// Use disconnected graph to categorize as many nodes as possible
-			_, g1nodes := g.bfs(source, nil)
-			for n := range g1nodes {
-				g1[n] = nul
-			}
-			_, g2nodes := g.bfs(dest, nil)
-			for n := range g2nodes {
-				g2[n] = nul
-			}
+			g.bfs(source, nil)
+			dest.group = 2
+			g.bfs(dest, nil)
 		}
 		g.resetEdges()
 	}
-	return g1, g2
+
+	disconnected := 0
+	for _, n := range g.nodes {
+		if n.group != 1 {
+			disconnected++
+		}
+	}
+	return len(g.nodes) - disconnected, disconnected
 }
 
 func parse(input []string) *graph {
@@ -158,6 +156,6 @@ const cutCount = 3
 func main() {
 	input := util.StdinReadlines()
 	g := parse(input)
-	g1, g2 := g.split(cutCount)
-	fmt.Println(len(g1) * len(g2))
+	g1size, g2size := g.split(cutCount)
+	fmt.Println(g1size * g2size)
 }
