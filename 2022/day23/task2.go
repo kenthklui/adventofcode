@@ -1,231 +1,163 @@
 package main
 
 import (
-	"bufio"
 	"fmt"
-	"os"
+	"slices"
+
+	"github.com/kenthklui/adventofcode/util"
 )
 
-func intMinMax(a, b int) (int, int) {
-	if a < b {
-		return a, b
-	} else {
-		return b, a
-	}
-}
+const int32mask int = (1 << 32) - 1
 
 type position struct {
 	x, y int
 }
 
-func (p position) north() position { return position{p.x, p.y + 1} }
-func (p position) south() position { return position{p.x, p.y - 1} }
-func (p position) west() position  { return position{p.x - 1, p.y} }
-func (p position) east() position  { return position{p.x + 1, p.y} }
+func (p position) add(dir position) position { return position{p.x + dir.x, p.y + dir.y} }
+func (p position) key() int                  { return (p.x&int32mask)<<32 + (p.y & int32mask) }
 
-type floorMap struct {
-	elves     []*elf
-	floor     map[position]*elf
-	firstCons int
-}
-
-func NewFloorMap() *floorMap {
-	return &floorMap{
-		elves:     make([]*elf, 0),
-		floor:     make(map[position]*elf),
-		firstCons: 0,
-	}
-}
+var (
+	n            = position{0, -1}
+	s            = position{0, 1}
+	w            = position{-1, 0}
+	e            = position{1, 0}
+	nw           = position{-1, -1}
+	ne           = position{1, -1}
+	sw           = position{-1, 1}
+	se           = position{1, 1}
+	dir          = [8]position{n, s, w, e, nw, ne, sw, se}
+	clear  int64 = 0b11111111
+	nValid int64 = 0b10001100
+	sValid int64 = 0b01000011
+	wValid int64 = 0b00101010
+	eValid int64 = 0b00010101
+)
 
 type elf struct {
 	pos position
 }
 
-func (fm *floorMap) round() bool {
-	proposals := fm.consider()
-	fm.firstCons = (fm.firstCons + 1) % 4
-	return fm.execute(proposals)
+type claim struct {
+	e      *elf
+	newPos position
+	valid  bool
 }
 
-func (fm *floorMap) consider() map[position][]*elf {
-	proposals := make(map[position][]*elf)
+type proposals map[int]*claim
 
+type floorMap struct {
+	elves     []*elf
+	floor     map[int]*elf
+	firstCons int
+	props     proposals
+}
+
+func NewFloorMap(elves []*elf) *floorMap {
+	fm := floorMap{
+		elves:     elves,
+		floor:     make(map[int]*elf, len(elves)),
+		firstCons: 0,
+		props:     make(proposals, len(elves)),
+	}
+	for _, e := range elves {
+		fm.floor[e.pos.key()] = e
+	}
+	return &fm
+}
+
+func (fm *floorMap) round() bool {
+	fm.consider()
+	moves := fm.execute()
+	fm.firstCons = (fm.firstCons + 1) % 4
+	return moves > 0
+}
+
+func (fm *floorMap) options(e *elf) [5]bool {
+	var flag int64
+	for _, d := range dir {
+		pos := e.pos.add(d)
+		flag <<= 1
+		if _, ok := fm.floor[pos.key()]; !ok {
+			flag++
+		}
+	}
+	return [5]bool{
+		flag&nValid == nValid,
+		flag&sValid == sValid,
+		flag&wValid == wValid,
+		flag&eValid == eValid,
+		flag == clear,
+	}
+}
+
+func (fm *floorMap) consider() {
 	for _, e := range fm.elves {
-		if fm.considerEmpty(e.pos.x, e.pos.y) {
+		valid := fm.options(e)
+		if valid[4] {
 			continue
 		}
-		cons := fm.firstCons
-	Loop:
-		for i := 0; i < 4; i++ {
-			switch (cons + i) % 4 {
-			case 0:
-				if fm.considerNorth(e.pos.x, e.pos.y) {
-					val, ok := proposals[e.pos.north()]
-					if !ok {
-						val = []*elf{}
-					}
-					proposals[e.pos.north()] = append(val, e)
-					break Loop
+
+		for j := 0; j < 4; j++ {
+			cons := (fm.firstCons + j) % 4
+			if valid[cons] {
+				newPos := e.pos.add(dir[cons])
+				newPosKey := newPos.key()
+				if cl, ok := fm.props[newPosKey]; ok {
+					cl.valid = false
+				} else {
+					fm.props[newPosKey] = &claim{e, newPos, true}
 				}
-			case 1:
-				if fm.considerSouth(e.pos.x, e.pos.y) {
-					val, ok := proposals[e.pos.south()]
-					if !ok {
-						val = []*elf{}
-					}
-					proposals[e.pos.south()] = append(val, e)
-					break Loop
-				}
-			case 2:
-				if fm.considerWest(e.pos.x, e.pos.y) {
-					val, ok := proposals[e.pos.west()]
-					if !ok {
-						val = []*elf{}
-					}
-					proposals[e.pos.west()] = append(val, e)
-					break Loop
-				}
-			case 3:
-				if fm.considerEast(e.pos.x, e.pos.y) {
-					val, ok := proposals[e.pos.east()]
-					if !ok {
-						val = []*elf{}
-					}
-					proposals[e.pos.east()] = append(val, e)
-					break Loop
-				}
+				break
 			}
 		}
 	}
-
-	return proposals
 }
 
-func (fm *floorMap) execute(proposals map[position][]*elf) bool {
-	moved := false
-	for pos, elves := range proposals {
-		if len(elves) > 1 {
-			continue
+func (fm *floorMap) execute() int {
+	moves := 0
+	for newPosKey, cl := range fm.props {
+		if cl.valid {
+			delete(fm.floor, cl.e.pos.key())
+			fm.floor[newPosKey] = cl.e
+			cl.e.pos = cl.newPos
+			moves++
 		}
 
-		fm.floor[elves[0].pos] = nil
-		fm.floor[pos] = elves[0]
-		elves[0].pos = pos
-		moved = true
+		delete(fm.props, newPosKey)
 	}
-	return moved
-}
-
-func (fm *floorMap) considerEmpty(x, y int) bool {
-	n := position{x, y + 1}
-	ne := position{x + 1, y + 1}
-	nw := position{x - 1, y + 1}
-	w := position{x - 1, y}
-	e := position{x + 1, y}
-	s := position{x, y - 1}
-	se := position{x + 1, y - 1}
-	sw := position{x - 1, y - 1}
-	for _, pos := range []position{n, ne, nw, w, e, s, se, sw} {
-		if val, ok := fm.floor[pos]; ok && val != nil {
-			return false
-		}
-	}
-	return true
-}
-
-func (fm *floorMap) considerNorth(x, y int) bool {
-	n := position{x, y + 1}
-	ne := position{x + 1, y + 1}
-	nw := position{x - 1, y + 1}
-	for _, pos := range []position{n, ne, nw} {
-		if val, ok := fm.floor[pos]; ok && val != nil {
-			return false
-		}
-	}
-	return true
-}
-
-func (fm *floorMap) considerSouth(x, y int) bool {
-	s := position{x, y - 1}
-	se := position{x + 1, y - 1}
-	sw := position{x - 1, y - 1}
-	for _, pos := range []position{s, se, sw} {
-		if val, ok := fm.floor[pos]; ok && val != nil {
-			return false
-		}
-	}
-	return true
-}
-
-func (fm *floorMap) considerWest(x, y int) bool {
-	w := position{x - 1, y}
-	nw := position{x - 1, y + 1}
-	sw := position{x - 1, y - 1}
-	for _, pos := range []position{w, nw, sw} {
-		if val, ok := fm.floor[pos]; ok && val != nil {
-			return false
-		}
-	}
-	return true
-}
-
-func (fm *floorMap) considerEast(x, y int) bool {
-	e := position{x + 1, y}
-	ne := position{x + 1, y + 1}
-	se := position{x + 1, y - 1}
-	for _, pos := range []position{e, ne, se} {
-		if val, ok := fm.floor[pos]; ok && val != nil {
-			return false
-		}
-	}
-	return true
+	return moves
 }
 
 func (fm *floorMap) emptySpace() int {
-	var minX, minY, maxX, maxY int
-	for _, e := range fm.elves {
-		minX, _ = intMinMax(e.pos.x, minX)
-		minY, _ = intMinMax(e.pos.y, minY)
-		_, maxX = intMinMax(e.pos.x, maxX)
-		_, maxY = intMinMax(e.pos.y, maxY)
+	x, y := make([]int, len(fm.elves)), make([]int, len(fm.elves))
+	for i, e := range fm.elves {
+		x[i], y[i] = e.pos.x, e.pos.y
 	}
+	minX, maxX := slices.Min(x), slices.Max(x)
+	minY, maxY := slices.Min(y), slices.Max(y)
 	return (maxX-minX+1)*(maxY-minY+1) - len(fm.elves)
 }
 
 func parseInput(input []string) *floorMap {
-	fm := NewFloorMap()
-	for dy, line := range input {
+	elves := make([]*elf, 0)
+	for y, line := range input {
 		for x, r := range line {
 			if r == '#' {
-				pos := position{x, -dy}
+				pos := position{x, y}
 				e := &elf{pos}
-				fm.floor[pos] = e
-				fm.elves = append(fm.elves, e)
+				elves = append(elves, e)
 			}
 		}
 	}
-	return fm
-}
-
-func readInput() []string {
-	lines := make([]string, 0)
-	scanner := bufio.NewScanner(os.Stdin)
-	for scanner.Scan() {
-		lines = append(lines, scanner.Text())
-	}
-	if scanner.Err() != nil {
-		panic(scanner.Err())
-	}
-	return lines
+	return NewFloorMap(elves)
 }
 
 func main() {
-	input := readInput()
+	input := util.StdinReadlines()
 	fm := parseInput(input)
-	for i := 0; true; i++ {
-		if !fm.round() {
-			fmt.Println(i + 1)
-			return
-		}
+	i := 1
+	for fm.round() {
+		i++
 	}
+	fmt.Println(i)
 }
