@@ -2,7 +2,10 @@ package main
 
 import (
 	"fmt"
+	"runtime"
 	"slices"
+	"strings"
+	"sync"
 
 	"github.com/kenthklui/adventofcode/util"
 )
@@ -29,11 +32,13 @@ type vec struct {
 	x, y int
 }
 
-var up = vec{0, -1}
-var right = vec{1, 0}
-var down = vec{0, 1}
-var left = vec{-1, 0}
-var dirs = [4]vec{up, right, down, left}
+var (
+	up    = vec{0, -1}
+	right = vec{1, 0}
+	down  = vec{0, 1}
+	left  = vec{-1, 0}
+	dirs  = [4]vec{up, right, down, left}
+)
 
 func (v vec) add(dir vec) vec    { return vec{v.x + dir.x, v.y + dir.y} }
 func (v vec) mod2(steps int) int { return (v.x + v.y + steps) % 2 }
@@ -41,41 +46,53 @@ func (v vec) mod2(steps int) int { return (v.x + v.y + steps) % 2 }
 type garden struct {
 	width, height, evens, odds int
 	start                      vec
-	grid                       map[vec]byte
-
-	stepsCache map[vec]steps
-	edges      []vec
+	grid                       [][]byte
+	stepsCache                 [][]*steps
+	edges                      []vec
 }
 
 type steps struct {
-	node             map[vec]int
-	edgeMin, edgeMax int
+	node     [][]int
+	min, max int
 }
 
-func parseGarden(input []string) garden {
+func (s *steps) stepsTo(v vec) int { return s.node[v.y][v.x] }
+
+func (s *steps) reachables() []vec {
+	vecs := make([]vec, 0, len(s.node)*len(s.node[0]))
+	for y, row := range s.node {
+		for x, distance := range row {
+			if distance >= 0 {
+				vecs = append(vecs, vec{x, y})
+			}
+		}
+	}
+	return vecs
+}
+
+func parseGarden(input []string) *garden {
 	width, height := len(input[0]), len(input)
 	var start vec
-	grid := make(map[vec]byte)
-	odds, evens := 0, 0
+	grid, stepsCache := make([][]byte, height), make([][]*steps, height)
 	for y, row := range input {
+		grid[y], stepsCache[y] = make([]byte, width), make([]*steps, width)
 		for x, c := range row {
 			if c == 'S' {
 				start = vec{x, y}
-				c = '.'
 			}
-			grid[vec{x, y}] = byte(c)
+			grid[y][x] = byte(c)
 		}
 	}
-	g := garden{
+	g := &garden{
 		width:      width,
 		height:     height,
-		evens:      evens,
-		odds:       odds,
 		start:      start,
 		grid:       grid,
-		stepsCache: make(map[vec]steps),
+		stepsCache: stepsCache,
 	}
-	for v := range g.nodeSteps(g.start).node {
+
+	g.precomputeDistances()
+	for _, v := range g.nodeSteps(g.start).reachables() {
 		if v.mod2(0) == 0 {
 			g.evens++
 		} else {
@@ -86,26 +103,8 @@ func parseGarden(input []string) garden {
 	return g
 }
 
-func (g garden) inBounds(v vec) bool {
+func (g *garden) inBounds(v vec) bool {
 	return v.x >= 0 && v.y >= 0 && v.x < g.width && v.y < g.height
-}
-
-func (g garden) crossBorder(oob vec) vec {
-	if oob.x < 0 {
-		oob.x += g.width
-		return oob
-	} else if oob.x >= g.width {
-		oob.x -= g.width
-		return oob
-	}
-	if oob.y < 0 {
-		oob.y += g.height
-		return oob
-	} else if oob.y >= g.height {
-		oob.y -= g.height
-		return oob
-	}
-	panic("Not out of bounds")
 }
 
 type agent struct {
@@ -113,58 +112,57 @@ type agent struct {
 	steps int
 }
 
-func (g garden) nodeSteps(start vec) steps {
-	s, ok := g.stepsCache[start]
-	if !ok {
-		travelled := make(map[vec]int)
+func (g *garden) nodeSteps(start vec) *steps {
+	cached := g.stepsCache[start.y][start.x]
+	if cached == nil {
+		stepsTo, queued := make([][]int, g.height), make([][]bool, g.height)
+		for y := range stepsTo {
+			stepsTo[y], queued[y] = make([]int, g.width), make([]bool, g.width)
+			for x := range stepsTo[y] {
+				stepsTo[y][x] = -1
+			}
+		}
+
 		queue := make([]agent, 0, g.width*g.height)
 		queue = append(queue, agent{start, 0})
+		queued[start.y][start.x] = true
 
-		stepsToNode := make(map[vec]int)
-		// Interestingly all inputs have open edge nodes
+		// Interestingly, all inputs have open edge nodes...
 		for len(queue) > 0 {
 			a := queue[0]
 			queue = queue[1:]
 
-			stepsToNode[a.v] = a.steps
-			travelled[a.v] = 2
-
+			stepsTo[a.v.y][a.v.x] = a.steps
 			for _, d := range dirs {
 				if n := a.v.add(d); g.inBounds(n) {
-					if travelled[n] > 0 {
-						continue
+					if g.grid[n.y][n.x] != '#' && !queued[n.y][n.x] {
+						queue = append(queue, agent{n, a.steps + 1})
+						queued[n.y][n.x] = true
 					}
-					if g.grid[n] == '#' {
-						continue
-					}
-
-					travelled[n] = 1
-					queue = append(queue, agent{n, a.steps + 1})
 				}
 			}
 		}
 
-		edgeMin, edgeMax := g.width+g.height, 0
-		for _, e := range g.getEdges() {
-			s, _ := stepsToNode[e]
-			if s < edgeMin {
-				edgeMin = s
+		min, max := g.width+g.height, 0
+		for _, row := range stepsTo {
+			if rowMin := slices.Min(row); rowMin < min {
+				min = rowMin
 			}
-			if s > edgeMax {
-				edgeMax = s
+			if rowMax := slices.Max(row); rowMax > max {
+				max = rowMax
 			}
 		}
 
-		s = steps{stepsToNode, edgeMin, edgeMax}
-		g.stepsCache[start] = s
+		cached = &steps{stepsTo, min, max}
+		g.stepsCache[start.y][start.x] = cached
 	}
 
-	return s
+	return cached
 }
 
-func (g garden) getEdges() []vec {
+func (g *garden) getEdges() []vec {
 	if g.edges == nil {
-		edgeNodes := make([]vec, 0, (g.width+g.height-2)*2)
+		edgeNodes := make([]vec, 0, (g.width+g.height)*2)
 		for i := 0; i < g.width; i++ {
 			edgeNodes = append(edgeNodes, vec{i, 0})
 		}
@@ -174,7 +172,7 @@ func (g garden) getEdges() []vec {
 		for i := g.width - 2; i >= 0; i-- {
 			edgeNodes = append(edgeNodes, vec{i, g.height - 1})
 		}
-		for i := g.height - 2; i >= 1; i-- {
+		for i := g.height - 2; i >= 0; i-- {
 			edgeNodes = append(edgeNodes, vec{0, i})
 		}
 		g.edges = edgeNodes
@@ -183,13 +181,36 @@ func (g garden) getEdges() []vec {
 	return g.edges
 }
 
-// Corners in clockwise, from top left
-func (g garden) corners() []vec {
-	w, h := g.width-1, g.height-1
-	return []vec{vec{0, 0}, vec{w, 0}, vec{w, h}, vec{0, h}}
+func (g *garden) precomputeDistances() {
+	startCh := make(chan vec)
+	go func(ch chan<- vec) {
+		ch <- g.start
+		for _, e := range g.getEdges() {
+			ch <- e
+		}
+		close(ch)
+	}(startCh)
+
+	var wg sync.WaitGroup
+	for i := 0; i < runtime.NumCPU(); i++ {
+		wg.Add(1)
+		go func(ch <-chan vec) {
+			defer wg.Done()
+			for start := range ch {
+				g.nodeSteps(start)
+			}
+		}(startCh)
+	}
+	wg.Wait()
 }
 
-func (g garden) dirEdge(dirIndex int) []vec {
+// Corners in clockwise, from top left
+func (g *garden) corners() [4]vec {
+	w, h := g.width-1, g.height-1
+	return [4]vec{vec{0, 0}, vec{w, 0}, vec{w, h}, vec{0, h}}
+}
+
+func (g *garden) dirEdge(dirIndex int) []vec {
 	var start, length int
 	switch dirIndex {
 	case 0:
@@ -203,36 +224,31 @@ func (g garden) dirEdge(dirIndex int) []vec {
 		length = g.width
 	case 3:
 		start = g.width + g.width + g.height - 3
-		edge := make([]vec, g.height)
-		copy(edge, g.getEdges()[start:])
-		edge[len(edge)-1] = g.getEdges()[0]
-		return edge
+		length = g.height
 	}
 	return slices.Clone(g.getEdges()[start : start+length])
 }
 
-func (g garden) diagonalReachable(cornerIndex, stepsRemain int) int {
+func (g *garden) diagonalSum(cornerIndex, stepsRemain int) int {
 	if stepsRemain < 0 {
 		return 0
 	}
-	// Assume height == width
+
 	corner := g.corners()[cornerIndex]
 	cornerSteps := g.nodeSteps(corner)
-	if cornerSteps.edgeMax > g.width+g.height-2 {
+	if cornerSteps.max > g.width+g.height-2 {
 		panic("Non-trivial square!")
 	}
 	oppositeCorner := g.corners()[(cornerIndex+2)%4]
-	oppositeCornerDistance := cornerSteps.node[oppositeCorner]
+	oppositeCornerDistance := cornerSteps.stepsTo(oppositeCorner)
 
 	reachableSum := 0
 
 	// Assume height == width
 	q, r := stepsRemain/g.height, stepsRemain%g.height
-	for r < oppositeCornerDistance {
-		perDiagonal := g.localReachable([]agent{{corner, r}})
+	for r <= oppositeCornerDistance {
+		perDiagonal := g.singleSum([]agent{{corner, r}})
 		diagonalCount := q + 1
-
-		// fmt.Println(cornerIndex, diagonalCount, perDiagonal)
 		reachableSum += diagonalCount * perDiagonal
 
 		q--
@@ -240,160 +256,138 @@ func (g garden) diagonalReachable(cornerIndex, stepsRemain int) int {
 	}
 	q++
 
-	initial, alternative := g.odds, g.evens
+	tileValue, altValue := g.odds, g.evens
 	if stepsRemain%2 == 0 {
-		initial, alternative = g.evens, g.odds
+		tileValue, altValue = g.evens, g.odds
 	}
 
 	if interweave := (g.height%2 == 1); interweave {
-		reachableSum += sumOddsUpTo(q) * initial
-		reachableSum += sumEvensUpTo(q) * alternative
+		reachableSum += sumOddsUpTo(q) * tileValue
+		reachableSum += sumEvensUpTo(q) * altValue
 	} else {
-		reachableSum += sumUpTo(q) * initial
+		reachableSum += sumUpTo(q) * tileValue
 	}
 
 	return reachableSum
 }
 
-func (g garden) straightReachable(agents []agent, dirIndex int) int {
-	agentSteps := make(map[vec]steps)
+func (g *garden) borderStepsSig(borderSteps []int, mod int) string {
+	minSteps := slices.Min(borderSteps)
+	mod = minSteps - (minSteps % mod)
 
-	type edgeTracker struct {
-		edge                       vec
-		closest, closestAgentIndex int
+	// Assume input grid has height and width <= 255
+	var b strings.Builder
+	for _, s := range borderSteps {
+		b.WriteByte(byte(s - mod))
 	}
-	edgeNodes := g.dirEdge(dirIndex)
-	oppositeEdge := make([]edgeTracker, len(edgeNodes))
-	for i, e := range edgeNodes {
-		oppositeEdge[i].edge = e
-	}
+	return b.String()
+}
 
-	canCover, canCross := false, false
-	for i, a := range agents {
-		agentSteps[a.v] = g.nodeSteps(a.v)
-		if a.steps >= agentSteps[a.v].edgeMax {
-			canCover, canCross = true, true
-		}
-		for j, e := range oppositeEdge {
-			crossing := agentSteps[a.v].node[e.edge]
-			if e.closest == 0 || crossing < e.closest {
-				oppositeEdge[j].closest = crossing
-				oppositeEdge[j].closestAgentIndex = i
-			}
-			if diff := agents[i].steps - crossing; diff > 0 {
-				canCross = true
-			}
-		}
+func (g *garden) straightSum(borderSteps []int, dirIndex, depth int) int {
+	if maxBorderSteps := slices.Max(borderSteps); maxBorderSteps < 0 {
+		return 0
 	}
 
-	newAgentIndices := make(map[int]void)
-	for _, e := range oppositeEdge {
-		newAgentIndices[e.closestAgentIndex] = nul
-	}
-	newAgents := make([]agent, 0, len(agents))
-	crossings := make([]int, len(newAgentIndices))
-	for i := range newAgentIndices {
-		a := agents[i]
-		oppositeDir := dirs[(dirIndex+2)%4]
-		oppositeSide := g.crossBorder(a.v.add(oppositeDir))
-		crossing := agentSteps[a.v].node[oppositeSide] + 1
-		newSteps := a.steps - crossing
-		if newSteps > 0 {
-			crossings[len(newAgents)] = crossing
-			newAgents = append(newAgents, agent{a.v, newSteps})
+	startDir, endDir := (dirIndex+2)%4, dirIndex
+	startSide, endSide := g.dirEdge(startDir), g.dirEdge(endDir)
+	slices.Reverse(startSide)
+
+	crossCost := make([][]int, len(startSide))
+	for i, start := range startSide {
+		crossCost[i] = make([]int, len(endSide))
+		nodeCost := g.nodeSteps(start)
+		for j, end := range endSide {
+			crossCost[i][j] = nodeCost.stepsTo(end) + 1
 		}
 	}
+
+	mod := g.height
+	if dirIndex%2 == 1 {
+		mod = g.width
+	}
+	interweave := (mod%2 == 1)
+
+	tileValue, altValue := g.evens, g.odds
+	if tileMod2 := startSide[0].mod2(borderSteps[0]); tileMod2 == 1 {
+		tileValue, altValue = g.odds, g.evens
+	}
+
+	sig := g.borderStepsSig(borderSteps, mod)
+	stepsRemain, working := make([]int, len(borderSteps)), make([]int, len(borderSteps))
 
 	reachableSum := 0
-	if canCover {
-		// Since all borders are open, any cell should be fine for even/odd computation
-		var currentSquareSum int
-		if mod2 := agents[0].v.mod2(agents[0].steps); mod2 == 0 {
-			currentSquareSum = g.evens
-		} else {
-			currentSquareSum = g.odds
+	for iteration, increment := 0, 1; true; iteration += increment {
+		for i, ccRow := range crossCost {
+			for j := range ccRow {
+				working[j] = borderSteps[j] - crossCost[j][i]
+			}
+			stepsRemain[i] = slices.Max(working)
 		}
 
-		canSkip := (len(agents) == len(newAgents))
-		for i, na := range newAgents {
-			if na.steps < agentSteps[na.v].edgeMax {
-				canSkip = false
-				break
-			}
-			if na.v != agents[i].v {
-				canSkip = false
-				break
-			}
-		}
-
-		if canSkip {
-			stepsRemain := make([]int, len(newAgents))
-			for i, a := range newAgents {
-				stepsRemain[i] = a.steps
-			}
-			leastSteps := slices.Min(stepsRemain)
-			leastStepsAgentIndex := slices.IndexFunc(newAgents, func(a agent) bool {
-				return a.steps == leastSteps
-			})
-			leastStepsAgent := newAgents[leastStepsAgentIndex]
-
-			h := slices.Min(crossings)
-			q, r := leastSteps/h, leastSteps%h
-			for q > 0 && r+h < agentSteps[leastStepsAgent.v].edgeMax {
-				q--
-				r += h
-			}
-			// fmt.Println(dirIndex, "Shortcutting:", newAgents, h, q, r)
-			// fmt.Println(dirIndex, "Agents are:", agents, newAgents)
-			// fmt.Println(dirIndex, "Opposite edge:", oppositeEdge)
-
-			if interweave := (g.height%2 == 1); interweave {
-				// fmt.Println(dirIndex, "Fast forward", q, g.evens, g.odds, currentSquareSum)
-				reachableSum += (g.evens + g.odds) * (q / 2)
-				if q%2 == 1 {
-					reachableSum += currentSquareSum
+		if minStepsRemain := slices.Min(stepsRemain); minStepsRemain < 0 {
+			// Some edges couldn't cross, break
+			a1, a2 := []agent{}, []agent{}
+			for i, s := range startSide {
+				if borderSteps[i] >= 0 {
+					a1 = append(a1, agent{s, borderSteps[i]})
 				}
-			} else {
-				reachableSum += q * currentSquareSum
+				if stepsRemain[i] >= 0 {
+					a2 = append(a2, agent{s, stepsRemain[i]})
+				}
 			}
-
-			for i := range newAgents {
-				newAgents[i].steps = agents[i].steps - q*h
-			}
-			newSum := g.straightReachable(newAgents, dirIndex)
-			// fmt.Println(dirIndex, newAgents, newSum)
-			reachableSum += newSum
-
-			return reachableSum
+			reachableSum += g.singleSum(a1)
+			reachableSum += g.singleSum(a2)
+			break
 		}
 
-		if mod2 := agents[0].v.mod2(agents[0].steps); mod2 == 0 {
-			reachableSum += g.evens
+		if newSig := g.borderStepsSig(stepsRemain, mod); newSig == sig {
+			minJumpAmount := slices.Min(borderSteps)
+			skipIterations := minJumpAmount / mod
+			if skipIterations > 0 {
+				if interweave {
+					reachableSum += (tileValue + altValue) * (skipIterations / 2)
+					if skipIterations%2 == 1 {
+						if iteration%2 == 1 {
+							reachableSum += altValue
+						} else {
+							reachableSum += tileValue
+						}
+					}
+				} else {
+					reachableSum += tileValue * skipIterations
+				}
+
+				skipValue := skipIterations * mod
+				for i := range borderSteps {
+					borderSteps[i] -= skipValue
+				}
+
+				increment = skipIterations
+				continue
+			}
 		} else {
-			reachableSum += g.odds
+			sig = newSig
 		}
-	} else {
-		newSum := g.localReachable(agents)
-		// fmt.Println(dirIndex, "Sum:", newSum, "Agents are:", agents)
-		reachableSum += newSum
-	}
 
-	// Build new agent list and recurse
-	if canCross {
-		reachableSum += g.straightReachable(newAgents, dirIndex)
+		if interweave && iteration%2 == 1 {
+			reachableSum += altValue
+		} else {
+			reachableSum += tileValue
+		}
+
+		copy(borderSteps, stepsRemain)
+		increment = 1
 	}
 
 	return reachableSum
 }
 
-func (g garden) localReachable(agents []agent) int {
-	agentSteps := make(map[vec]steps)
-
-	for _, a := range agents {
-		agentSteps[a.v] = g.nodeSteps(a.v)
-		mod2 := a.v.mod2(a.steps)
-		if a.steps >= agentSteps[a.v].edgeMax {
-			if mod2 == 0 {
+func (g *garden) singleSum(agents []agent) int {
+	agentSteps := make([]*steps, len(agents))
+	for i, a := range agents {
+		agentSteps[i] = g.nodeSteps(a.v)
+		if a.steps >= agentSteps[i].max {
+			if a.v.mod2(a.steps) == 0 {
 				return g.evens
 			} else {
 				return g.odds
@@ -402,10 +396,10 @@ func (g garden) localReachable(agents []agent) int {
 	}
 
 	reachables := make(map[vec]void)
-	for _, a := range agents {
+	for i, a := range agents {
 		mod2 := a.v.mod2(a.steps)
-		for dest, stepsToReach := range agentSteps[a.v].node {
-			if a.steps >= stepsToReach && dest.mod2(0) == mod2 {
+		for _, dest := range agentSteps[i].reachables() {
+			if dest.mod2(0) == mod2 && a.steps >= agentSteps[i].stepsTo(dest) {
 				reachables[dest] = nul
 			}
 		}
@@ -414,54 +408,28 @@ func (g garden) localReachable(agents []agent) int {
 	return len(reachables)
 }
 
-func (g garden) neighborReachable(agents []agent) [4]int {
-	var reachables [4]int
-	for i, dir := range dirs {
-		crossBorderAgents := make([]agent, 0)
-		for _, a := range agents {
-			n := a.v.add(dir)
-			if g.inBounds(n) {
-				continue
-			}
-			n = g.crossBorder(n)
-			crossBorderAgents = append(crossBorderAgents, agent{n, a.steps - 1})
-		}
-		reachables[i] = g.localReachable(crossBorderAgents)
-	}
-	return reachables
-}
+func (g *garden) sumAll(node vec, steps int) int {
+	reachableSum := g.singleSum([]agent{{g.start, steps}})
 
-func (g garden) multiReachable(node vec, steps int) int {
-	reachableSum := 0
-	reachableSum += g.localReachable([]agent{{g.start, steps}})
-
-	startSteps := g.nodeSteps(g.start)
-	if startSteps.edgeMin < steps {
+	if startSteps := g.nodeSteps(g.start); startSteps.min < steps {
 		// Handle 4 corners
 		corners := g.corners()
 		for i, corner := range corners {
-			stepsToCorner := startSteps.node[corner]
-			oppositeIndex := (i + 2) % 4
-			sum := g.diagonalReachable(oppositeIndex, steps-stepsToCorner-2)
-			// fmt.Println("Diagonal", i, sum)
-			reachableSum += sum
+			stepsToCorner := startSteps.stepsTo(corner)
+			if stepsRemain := steps - stepsToCorner - 2; stepsRemain >= 0 {
+				oppositeIndex := (i + 2) % 4
+				reachableSum += g.diagonalSum(oppositeIndex, stepsRemain)
+			}
 		}
 
 		// Handle going straight in 4 directions
-		for dirIndex, dir := range dirs {
+		for dirIndex := range dirs {
 			edge := g.dirEdge(dirIndex)
-			agents := make([]agent, 0, len(edge))
-			for _, e := range edge {
-				newSteps := steps - startSteps.node[e] - 1
-				if newSteps > 0 {
-					otherSide := g.crossBorder(e.add(dir))
-					agents = append(agents, agent{otherSide, newSteps})
-				}
+			borderSteps := make([]int, len(edge))
+			for i, e := range edge {
+				borderSteps[i] = steps - startSteps.stepsTo(e) - 1
 			}
-
-			sum := g.straightReachable(agents, dirIndex)
-			// fmt.Println("Straight:", dirIndex, sum)
-			reachableSum += sum
+			reachableSum += g.straightSum(borderSteps, dirIndex, 0)
 		}
 	}
 
@@ -476,6 +444,6 @@ func main() {
 	input := util.StdinReadlines()
 	g := parseGarden(input)
 	for _, steps := range maxSteps {
-		fmt.Println(g.multiReachable(g.start, steps))
+		fmt.Println(g.sumAll(g.start, steps))
 	}
 }
