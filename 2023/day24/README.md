@@ -1,5 +1,7 @@
 # 2023 Day 24
-Reinventing the wheel and writing hundreds of lines for solving a system of linear equations with 6-10 variables seemed like a bad idea. Doing it by hand also seemed painful. Since Golang doesn't support Z3 directly, I wrote part 2 in python instead.
+A pure Golang solution (task2.go) with an in-built linear equation solver.
+
+Original solution (task2.py) was done with python since Golang doesn't support Z3 directly. Install dependencies and use as follow:
 
 ```bash
 pip install z3-solver importlib_resources
