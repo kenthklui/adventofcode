@@ -4,7 +4,10 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"slices"
 )
+
+const defaultPreambleSize = 25
 
 func failOnErr(err error) {
 	if err != nil {
@@ -17,10 +20,8 @@ type combo struct {
 }
 
 func readPreambleSize() (int, error) {
-	var preambleSize int
-	if len(os.Args) < 2 {
-		preambleSize = 25
-	} else {
+	preambleSize := defaultPreambleSize
+	if len(os.Args) >= 2 {
 		_, err := fmt.Sscanf(os.Args[1], "%d", &preambleSize)
 		if err != nil {
 			err := fmt.Errorf("Failed to parse preamble size: %q, reason: %q",
@@ -62,12 +63,14 @@ func findNonSum(values []int, preambleSize int) (int, error) {
 		if c, ok := sums[value]; !ok { // not a sum
 			return value, nil
 		} else if i-c.FirstIndex > preambleSize { // outdated sum
-			fmt.Printf(
-				"Old sum: %d[%d] = %d[%d] + %d[%d}",
-				value, i,
-				values[c.FirstIndex], c.FirstIndex,
-				values[c.SecondIndex], c.SecondIndex,
-			)
+			/*
+				fmt.Printf(
+					"Old sum: %d[%d] = %d[%d] + %d[%d]\n",
+					value, i,
+					values[c.FirstIndex], c.FirstIndex,
+					values[c.SecondIndex], c.SecondIndex,
+				)
+			*/
 			return value, nil
 		}
 
@@ -93,7 +96,7 @@ func findContSum(values []int, target int) (combo, error) {
 			newRun := run + iValue
 			if newRun == target {
 
-				fmt.Printf("Target %d is a sum from [%d] to [%d}", target, j, i)
+				// fmt.Printf("Target %d is a sum from [%d] to [%d]\n", target, j, i)
 				return combo{j, i}, nil
 			}
 
@@ -105,16 +108,8 @@ func findContSum(values []int, target int) (combo, error) {
 }
 
 func computeWeakness(values []int, c combo) int {
-	min := values[c.FirstIndex]
-	max := values[c.FirstIndex]
-
-	for _, value := range values[c.FirstIndex : c.SecondIndex+1] {
-		if value < min {
-			min = value
-		} else if value > max {
-			max = value
-		}
-	}
+	min := slices.Min(values[c.FirstIndex : c.SecondIndex+1])
+	max := slices.Max(values[c.FirstIndex : c.SecondIndex+1])
 
 	return min + max
 }
