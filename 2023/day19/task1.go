@@ -17,7 +17,7 @@ func parseParts(partStrs []string) []part {
 	parts := make([]part, 0, len(partStrs))
 	for _, line := range partStrs {
 		var p part
-		fmt.Sscanf(line, "{x=%d,m=%d,a=%d,s=%d]", &p.x, &p.m, &p.a, &p.s)
+		fmt.Sscanf(line, "{x=%d,m=%d,a=%d,s=%d}", &p.x, &p.m, &p.a, &p.s)
 		parts = append(parts, p)
 	}
 	return parts
