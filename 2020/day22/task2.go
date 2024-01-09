@@ -1,143 +1,104 @@
 package main
 
 import (
-	"bufio"
 	"fmt"
-	"os"
+	"slices"
 	"strconv"
 	"strings"
 
-	"container/list"
+	"github.com/kenthklui/adventofcode/util"
 )
 
-func readInput() []string {
-	lines := make([]string, 0)
+type void struct{}
 
-	scanner := bufio.NewScanner(os.Stdin)
-	for scanner.Scan() {
-		lines = append(lines, scanner.Text())
-	}
-	if scanner.Err() != nil {
-		panic(scanner.Err())
-	}
+var nul void
 
-	return lines
-}
-
-type deck struct {
-	Cards *list.List
-}
+type deck []int
 
 func (d deck) Score() int {
-	multiplier := d.Cards.Len()
 	score := 0
-
-	for e := d.Cards.Front(); e != nil; e = e.Next() {
-		score += multiplier * e.Value.(int)
-		multiplier--
+	for i, card := range d {
+		score += (len(d) - i) * card
 	}
-
 	return score
 }
 
-func checkPlayed(roundHistory map[string]bool, ds []deck) bool {
-	s1 := make([]rune, ds[0].Cards.Len())
-	for i, e := 0, ds[0].Cards.Front(); e != nil; e = e.Next() {
-		s1[i] = rune(e.Value.(int))
-		i++
+func checkPlayed(roundHistory map[string]void, decks [2]deck) bool {
+	var b strings.Builder
+	for _, c := range decks[0] {
+		b.WriteRune(rune(c))
 	}
+	// A game is uniquely identified by the contents in one of the two decks
+	/*
+		b.WriteRune(rune(255))
+		for _, c := range decks[1] {
+			b.WriteRune(rune(c))
+		}
+	*/
+	key := b.String()
 
-	s2 := make([]rune, ds[1].Cards.Len())
-	for i, e := 0, ds[1].Cards.Front(); e != nil; e = e.Next() {
-		s2[i] = rune(e.Value.(int))
-		i++
+	_, played := roundHistory[key]
+	if !played {
+		roundHistory[key] = nul
 	}
-
-	key := fmt.Sprintf("%s_%s", string(s1), string(s2))
-	if _, ok := roundHistory[key]; ok {
-		return true
-	}
-
-	roundHistory[key] = true
-	return false
+	return played
 }
 
-func recursiveCombat(card0, card1 int, ds []deck) int {
-	d1 := deck{list.New()}
-	for i, e := 0, ds[0].Cards.Front(); i < card0; i++ {
-		d1.Cards.PushBack(e.Value)
-		e = e.Next()
-	}
-
-	d2 := deck{list.New()}
-	for i, e := 0, ds[1].Cards.Front(); i < card1; i++ {
-		d2.Cards.PushBack(e.Value)
-		e = e.Next()
-	}
-
-	_, roundWinner := playDecks([]deck{d1, d2})
-	return roundWinner
-}
-
-func playDecks(ds []deck) ([]deck, int) {
-	roundHistory := make(map[string]bool)
-	for ds[0].Cards.Len() != 0 && ds[1].Cards.Len() != 0 {
-		if checkPlayed(roundHistory, ds) {
-			return nil, 0
+func playDecks(decks [2]deck) ([2]deck, int) {
+	roundHistory := make(map[string]void)
+	var roundWinner, card0, card1 int
+	for len(decks[0]) > 0 && len(decks[1]) > 0 {
+		if checkPlayed(roundHistory, decks) {
+			return decks, 0
 		}
 
-		card0 := ds[0].Cards.Remove(ds[0].Cards.Front()).(int)
-		card1 := ds[1].Cards.Remove(ds[1].Cards.Front()).(int)
+		card0, decks[0] = decks[0][0], decks[0][1:]
+		card1, decks[1] = decks[1][0], decks[1][1:]
 
-		var roundWinner int
-		if card0 <= ds[0].Cards.Len() && card1 <= ds[1].Cards.Len() {
-			roundWinner = recursiveCombat(card0, card1, ds)
+		if card0 <= len(decks[0]) && card1 <= len(decks[1]) {
+			newDecks := [2]deck{slices.Clone(decks[0][:card0]), slices.Clone(decks[1][:card1])}
+			_, roundWinner = playDecks(newDecks)
 		} else if card0 > card1 {
 			roundWinner = 0
 		} else {
 			roundWinner = 1
 		}
 
-		if roundWinner == 0 {
-			ds[0].Cards.PushBack(card0)
-			ds[0].Cards.PushBack(card1)
-		} else {
-			ds[1].Cards.PushBack(card1)
-			ds[1].Cards.PushBack(card0)
+		if roundWinner == 1 {
+			card0, card1 = card1, card0
 		}
+		decks[roundWinner] = append(decks[roundWinner], card0, card1)
 	}
 
-	if ds[0].Cards.Len() == 0 {
-		return ds, 1
+	if len(decks[0]) == 0 {
+		return decks, 1
 	} else {
-		return ds, 0
+		return decks, 0
 	}
 }
 
-func readDecks(input []string) []deck {
-	ds := make([]deck, 0)
-	i := 0
+func readDecks(input []string) [2]deck {
+	var decks [2]deck
+	deckNum := 0
 	for _, line := range input {
 		if strings.Contains(line, "Player") {
-			ds = append(ds, deck{list.New()})
+			decks[deckNum] = make(deck, 0)
 		} else if line == "" {
-			i++
+			deckNum++
 		} else {
-			card, err := strconv.Atoi(line)
-			if err != nil {
+			if card, err := strconv.Atoi(line); err == nil {
+				decks[deckNum] = append(decks[deckNum], card)
+			} else {
 				panic(err)
 			}
-			ds[i].Cards.PushBack(card)
 		}
 	}
-	return ds
+	return decks
 }
 
 func main() {
-	input := readInput()
-	ds := readDecks(input)
-	ds, winner := playDecks(ds)
-
-	fmt.Printf("Winner is player %d\n", winner+1)
-	fmt.Println(ds[winner].Score())
+	input := util.StdinReadlines()
+	decks := readDecks(input)
+	endDecks, winner := playDecks(decks)
+	fmt.Println(endDecks[winner].Score())
 }
