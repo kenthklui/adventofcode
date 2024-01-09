@@ -2,10 +2,11 @@ package main
 
 import (
 	"bufio"
-	"fmt"
 	"os"
 	"strconv"
 	"strings"
+
+	"github.com/kenthklui/adventofcode/util"
 )
 
 func readInput() []string {
@@ -42,22 +43,23 @@ func run(instructions []*instruction) []int {
 	return registerValues
 }
 
-func printScreen(registerValues []int) {
-	var b strings.Builder
-	for row := 0; row < 6; row++ {
-		start, end := row*40, (row+1)*40
-		for pixel, register := range registerValues[start:end] {
-			diff := pixel - register
-			if diff*diff <= 1 {
-				b.WriteRune('#')
-			} else {
-				b.WriteRune('.')
-			}
-		}
+const (
+	rows    = 6
+	columns = 40
+)
 
-		b.WriteRune('\n')
+func printScreen(registerValues []int) {
+	screen := make([][]bool, rows)
+	for row := range screen {
+		screen[row] = make([]bool, columns)
 	}
-	fmt.Printf(b.String())
+
+	for pixel, register := range registerValues {
+		row, column := pixel/columns, pixel%columns
+		diff := column - register
+		screen[row][column] = (diff*diff <= 1)
+	}
+	util.PrintScreen(screen)
 }
 
 func parseInput(input []string) []*instruction {
