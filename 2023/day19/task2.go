@@ -27,10 +27,6 @@ func parseParts(partStrs []string) []part {
 	return parts
 }
 
-func (p part) ratingSum() int {
-	return p.x + p.m + p.a + p.s
-}
-
 type rule struct {
 	op         byte
 	typ, value int
@@ -45,6 +41,11 @@ type workflow struct {
 
 type partsRange struct {
 	values [4][2]int
+}
+
+type divert struct {
+	pr partsRange
+	dest string
 }
 
 func (pr partsRange) volume() int {
@@ -88,22 +89,22 @@ func (r rule) applyRange(pr partsRange) (*partsRange, *partsRange) {
 	}
 }
 
-func (w workflow) ranges(pr partsRange) map[partsRange]string {
-	rangeMap := make(map[partsRange]string)
+func (w workflow) diversions(pr partsRange) []divert {
+	diverts := make([]divert, 0)
 	for _, r := range w.rules {
 		diverted, remains := r.applyRange(pr)
 		if diverted != nil {
-			rangeMap[*diverted] = r.dest
+			diverts = append(diverts, divert{*diverted, r.dest})
 		}
 		if remains != nil {
 			pr = *remains
 		} else {
-			break
+			return diverts
 		}
 	}
-	rangeMap[pr] = w.dest
 
-	return rangeMap
+	diverts = append(diverts, divert{pr, w.dest})
+	return diverts
 }
 
 func countAccepted(workflows map[string]workflow) int {
@@ -113,15 +114,15 @@ func countAccepted(workflows map[string]workflow) int {
 
 func (w workflow) recurseCountAccepted(workflows map[string]workflow, pr partsRange) int {
 	sum := 0
-	for subPr, destName := range w.ranges(pr) {
-		switch destName {
+	for _, d := range w.diversions(pr) {
+		switch d.dest {
 		case acceptedName:
-			sum += subPr.volume()
+			sum += d.pr.volume()
 		case rejectedName:
 			continue
 		default:
-			newWorkflow := workflows[destName]
-			sum += newWorkflow.recurseCountAccepted(workflows, subPr)
+			newWorkflow := workflows[d.dest]
+			sum += newWorkflow.recurseCountAccepted(workflows, d.pr)
 		}
 	}
 	return sum
