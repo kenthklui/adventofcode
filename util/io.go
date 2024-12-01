@@ -13,9 +13,10 @@ func PrintStrings(strArray []string) {
 	}
 }
 
-func PrintScreen(screen [][]bool) {
-	var b strings.Builder
-	for _, row := range screen {
+func ConvertScreen(screen [][]bool) []string {
+	output := make([]string, len(screen))
+	for i, row := range screen {
+		var b strings.Builder
 		for _, p := range row {
 			if p {
 				b.WriteRune('█')
@@ -23,9 +24,13 @@ func PrintScreen(screen [][]bool) {
 				b.WriteRune('░')
 			}
 		}
-		b.WriteRune('\n')
+		output[i] = b.String()
 	}
-	fmt.Printf(b.String())
+	return output
+}
+
+func PrintScreen(screen [][]bool) {
+	PrintStrings(ConvertScreen(screen))
 }
 
 func StdinReadlines() (input []string) {
