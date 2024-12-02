@@ -9,20 +9,14 @@ import (
 
 func solve(input []string) (output string) {
 	ints := util.ParseInts(input)
-	list1, list2 := make([]int, len(ints)), make(map[int]int)
-	for i := range ints {
-		list1[i] = ints[i][0]
-		if _, ok := list2[ints[i][1]]; ok {
-			list2[ints[i][1]]++
-		} else {
-			list2[ints[i][1]] = 1
-		}
+	freq := make(map[int]int)
+	for _, t := range ints {
+		freq[t[1]]++
 	}
+
 	distance := 0
-	for _, k := range list1 {
-		if v, ok := list2[k]; ok {
-			distance += (k * v)
-		}
+	for _, t := range ints {
+		distance += t[0] * freq[t[0]]
 	}
 	return strconv.Itoa(distance)
 }
