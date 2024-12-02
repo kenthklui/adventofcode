@@ -21,7 +21,7 @@ func (r report) tolerantSafe() bool {
 	for i := range r {
 		copy(subreport, r[:i])
 		copy(subreport[i:], r[i+1:])
-		if (subreport.increasing() || subreport.decreasing()) && subreport.adjacent() {
+		if subreport.safe() {
 			return true
 		}
 	}
