@@ -7,45 +7,40 @@ import (
 	"github.com/kenthklui/adventofcode/util"
 )
 
-type void struct{}
-
-var empty void
-
 type node struct {
-	val  int8
-	next []*node
+	val     int8
+	next    []*node
+	reached bool
 }
 
-func (n *node) followTrails() map[*node]void {
-	if n.val == int8(9) {
-		return map[*node]void{n: empty}
+func (n *node) followTrails() {
+	if n.val == 9 {
+		n.reached = true
+		return
 	}
 
-	trails := map[*node]void{}
 	for _, next := range n.next {
-		for trail := range next.followTrails() {
-			trails[trail] = empty
-		}
+		next.followTrails()
 	}
-	return trails
 }
 
 type nodeMap struct {
-	nodes [][]*node
-	heads []*node
+	heads, ends []*node
 }
 
 func parse(input []string) nodeMap {
-	heads := []*node{}
+	heads, ends := []*node{}, []*node{}
 	nodes := make([][]*node, len(input))
 	for y, line := range input {
 		nodes[y] = make([]*node, len(line))
 		for x, char := range line {
 			val := int8(char - '0')
-			curr := &node{val, []*node{}}
+			curr := &node{val, []*node{}, false}
 
 			if val == 0 {
 				heads = append(heads, curr)
+			} else if val == 9 {
+				ends = append(ends, curr)
 			}
 
 			if x > 0 {
@@ -70,13 +65,19 @@ func parse(input []string) nodeMap {
 			nodes[y][x] = curr
 		}
 	}
-	return nodeMap{nodes, heads}
+	return nodeMap{heads, ends}
 }
 
 func (nm nodeMap) trailheads() int {
 	count := 0
 	for _, head := range nm.heads {
-		count += len(head.followTrails())
+		head.followTrails()
+		for _, end := range nm.ends {
+			if end.reached {
+				count++
+				end.reached = false
+			}
+		}
 	}
 	return count
 }

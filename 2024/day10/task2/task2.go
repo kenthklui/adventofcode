@@ -25,7 +25,6 @@ func (n *node) countTrails() int {
 }
 
 type nodeMap struct {
-	nodes [][]*node
 	heads []*node
 }
 
@@ -64,7 +63,7 @@ func parse(input []string) nodeMap {
 			nodes[y][x] = curr
 		}
 	}
-	return nodeMap{nodes, heads}
+	return nodeMap{heads}
 }
 
 func (nm nodeMap) trailheads() int {
