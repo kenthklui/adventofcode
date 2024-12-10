@@ -3,6 +3,7 @@ package util
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 )
@@ -34,12 +35,21 @@ func PrintScreen(screen [][]bool) {
 }
 
 func StdinReadlines() (input []string) {
-	scanner := bufio.NewScanner(os.Stdin)
-	for input = make([]string, 0); scanner.Scan(); {
-		input = append(input, scanner.Text())
+	reader := bufio.NewReader(os.Stdin)
+	fullLine := make([]byte, 0, reader.Size())
+	for {
+		if line, isPrefix, err := reader.ReadLine(); err == nil {
+			fullLine = append(fullLine, line...)
+			if !isPrefix {
+				input = append(input, string(fullLine))
+				fullLine = fullLine[:0]
+			}
+		} else if err == io.EOF {
+			break
+		} else {
+			panic(err)
+		}
 	}
-	if err := scanner.Err(); err != nil {
-		panic(err)
-	}
+
 	return
 }
