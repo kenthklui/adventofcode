@@ -28,22 +28,6 @@ func pow(base, exp int) int {
 	}
 }
 
-type tuple struct {
-	left, right int
-}
-
-func step(val int) tuple {
-	if val == 0 {
-		val = 1
-		return tuple{1, -1}
-	} else if d := digits(val); d%2 == 0 {
-		split := pow(10, d/2)
-		return tuple{val / split, val % split}
-	} else {
-		return tuple{val * 2024, -1}
-	}
-}
-
 type cache map[int]int
 
 type stoneChain struct {
@@ -64,19 +48,22 @@ func (sc *stoneChain) countAfter(steps int) int {
 }
 
 func (sc *stoneChain) countAfterSteps(val, stepsRemain int) int {
-	if val < 0 {
-		return 0
-	}
 	if stepsRemain == 0 {
 		return 1
 	}
 
-	count, cached := sc.caches[stepsRemain-1][val]
+	stepsRemain--
+	count, cached := sc.caches[stepsRemain][val]
 	if !cached {
-		next := step(val)
-		count += sc.countAfterSteps(next.left, stepsRemain-1)
-		count += sc.countAfterSteps(next.right, stepsRemain-1)
-		sc.caches[stepsRemain-1][val] = count
+		if val == 0 {
+			count = sc.countAfterSteps(1, stepsRemain)
+		} else if d := digits(val); d%2 == 0 {
+			split := pow(10, d/2)
+			count = sc.countAfterSteps(val/split, stepsRemain) + sc.countAfterSteps(val%split, stepsRemain)
+		} else {
+			count = sc.countAfterSteps(val*2024, stepsRemain)
+		}
+		sc.caches[stepsRemain][val] = count
 	}
 	return count
 }
