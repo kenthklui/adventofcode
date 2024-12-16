@@ -8,29 +8,18 @@ import (
 	"github.com/kenthklui/adventofcode/util"
 )
 
-type vec2 struct {
-	x, y int
-}
-
 type point struct {
-	x, y int
-
+	x, y      int
 	neighbors [4]*point
 }
 
 type move struct {
 	p      *point
 	facing int
-
-	score   int
-	visited bool
+	score  int
 
 	// Index is needed for the priority queue
 	index int
-}
-
-func (m *move) inQueue() bool {
-	return m.index > -1
 }
 
 type moveQueue []*move
@@ -94,7 +83,6 @@ func newMaze(input []string) *maze {
 			grid[y][x] = &p
 		}
 	}
-
 	m.grid = grid
 
 	return m
@@ -104,69 +92,55 @@ func (m maze) isEnd(p *point) bool { return p.x == m.endX && p.y == m.endY }
 
 var COSTS = []int{1, 1000}
 
+type moveTracker [][][4]*move
+
+func newMoveTracker(height, width int) moveTracker {
+	mt := make([][][4]*move, height)
+	for y := range mt {
+		mt[y] = make([][4]*move, width)
+	}
+	return mt
+}
+
+func (mt moveTracker) createOrUpdate(p *point, facing int, newScore int) (m *move, isNew bool) {
+	m = mt[p.y][p.x][facing]
+	if m == nil {
+		m = &move{
+			p:      p,
+			facing: facing,
+			score:  newScore,
+		}
+		mt[p.y][p.x][facing] = m
+		isNew = true
+	} else if m.score > newScore {
+		m.score = newScore
+	}
+	return
+}
+
 func (m *maze) solve() int {
-	tracker := make([][][4]*move, m.height)
-	for y := range tracker {
-		tracker[y] = make([][4]*move, m.width)
-	}
+	mt := newMoveTracker(m.height, m.width)
 
-	initial := &move{
-		p:      m.grid[m.startY][m.startX],
-		facing: 1,
-	}
-	tracker[initial.p.y][initial.p.x][initial.facing] = initial
-
+	initial, _ := mt.createOrUpdate(m.grid[m.startY][m.startX], 1, 0)
 	mq := moveQueue{initial}
 	for len(mq) > 0 {
 		head := heap.Pop(&mq).(*move)
 		if m.isEnd(head.p) {
 			return head.score
 		}
-		head.visited = true
 
 		if forward := head.p.neighbors[head.facing]; forward != nil {
 			newScore := head.score + COSTS[0]
-			if tracker[forward.y][forward.x][head.facing] == nil {
-				nextMove := &move{
-					p:      forward,
-					facing: head.facing,
-					score:  newScore,
-				}
-				tracker[forward.y][forward.x][head.facing] = nextMove
+			if nextMove, isNew := mt.createOrUpdate(forward, head.facing, newScore); isNew {
 				heap.Push(&mq, nextMove)
-			} else if tracker[forward.y][forward.x][head.facing].score > newScore {
-				tracker[forward.y][forward.x][head.facing].score = newScore
 			}
 		}
 
 		for i := 1; i <= 3; i++ {
 			if newFacing := (head.facing + i) % 4; head.p.neighbors[newFacing] != nil {
 				turnScore := head.score + (2-(i%2))*COSTS[1]
-				if tracker[head.p.y][head.p.x][newFacing] == nil {
-					nextMove := &move{
-						p:      head.p,
-						facing: newFacing,
-						score:  turnScore,
-					}
-					tracker[head.p.y][head.p.x][newFacing] = nextMove
+				if nextMove, isNew := mt.createOrUpdate(head.p, newFacing, turnScore); isNew {
 					heap.Push(&mq, nextMove)
-				} else if tracker[head.p.y][head.p.x][head.facing].score > turnScore {
-					tracker[head.p.y][head.p.x][head.facing].score = turnScore
-				}
-
-				if forward := head.p.neighbors[head.facing]; forward != nil {
-					newScore := turnScore + COSTS[0]
-					if tracker[forward.y][forward.x][head.facing] == nil {
-						nextMove := &move{
-							p:      forward,
-							facing: head.facing,
-							score:  newScore,
-						}
-						tracker[forward.y][forward.x][head.facing] = nextMove
-						heap.Push(&mq, nextMove)
-					} else if tracker[forward.y][forward.x][head.facing].score > newScore {
-						tracker[forward.y][forward.x][head.facing].score = newScore
-					}
 				}
 			}
 		}

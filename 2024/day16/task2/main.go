@@ -8,30 +8,19 @@ import (
 	"github.com/kenthklui/adventofcode/util"
 )
 
-type vec2 struct {
-	x, y int
-}
-
 type point struct {
-	x, y int
-
+	x, y      int
 	neighbors [4]*point
 }
 
 type move struct {
 	p      *point
 	facing int
-
-	score   int
-	visited bool
-	prev    []*move
+	score  int
+	prev   []*move
 
 	// Index is needed for the priority queue
 	index int
-}
-
-func (m *move) inQueue() bool {
-	return m.index > -1
 }
 
 type moveQueue []*move
@@ -104,102 +93,84 @@ func (m maze) isEnd(p *point) bool { return p.x == m.endX && p.y == m.endY }
 
 var COSTS = []int{1, 1000}
 
-func (m *maze) markUsed(lastMove *move, usedTiles map[vec2]bool) {
-	usedTiles[vec2{lastMove.p.x, lastMove.p.y}] = true
-	if lastMove.prev != nil {
-		for _, prev := range lastMove.prev {
-			m.markUsed(prev, usedTiles)
+type moveTracker [][][4]*move
+
+func newMoveTracker(height, width int) moveTracker {
+	mt := make([][][4]*move, height)
+	for y := range mt {
+		mt[y] = make([][4]*move, width)
+	}
+	return mt
+}
+
+func (mt moveTracker) createOrUpdate(p *point, facing int, newScore int, prev *move) (m *move, isNew bool) {
+	m = mt[p.y][p.x][facing]
+	if m == nil {
+		m = &move{
+			p:      p,
+			facing: facing,
+			score:  newScore,
+			prev:   []*move{prev},
 		}
+		mt[p.y][p.x][facing] = m
+		isNew = true
+	} else if m.score > newScore {
+		m.score = newScore
+		m.prev = []*move{prev}
+	} else if m.score == newScore {
+		m.prev = append(m.prev, prev)
+	}
+	return
+}
+
+type tileTracker map[[2]int]bool
+
+func (tt tileTracker) markUsedTiles(lastMove *move) {
+	if lastMove == nil {
+		return
+	}
+	tt[[2]int{lastMove.p.x, lastMove.p.y}] = true
+	for _, prev := range lastMove.prev {
+		tt.markUsedTiles(prev)
 	}
 }
 
 func (m *maze) solve() int {
-	tracker := make([][][4]*move, m.height)
-	for y := range tracker {
-		tracker[y] = make([][4]*move, m.width)
-	}
-
-	initial := &move{
-		p:      m.grid[m.startY][m.startX],
-		facing: 1,
-	}
-	tracker[initial.p.y][initial.p.x][initial.facing] = initial
-	usedTiles := make(map[vec2]bool)
+	mt := newMoveTracker(m.height, m.width)
+	tt := make(tileTracker)
 	var bestScore int
 
+	initial, _ := mt.createOrUpdate(m.grid[m.startY][m.startX], 1, 0, nil)
 	mq := moveQueue{initial}
 	for len(mq) > 0 {
 		head := heap.Pop(&mq).(*move)
 		if m.isEnd(head.p) {
 			if bestScore == 0 {
 				bestScore = head.score
-				m.markUsed(head, usedTiles)
-			} else if head.score == bestScore {
-				m.markUsed(head, usedTiles)
-			} else {
+			} else if head.score > bestScore {
 				break
 			}
+			tt.markUsedTiles(head)
 		}
-		head.visited = true
 
 		if forward := head.p.neighbors[head.facing]; forward != nil {
 			newScore := head.score + COSTS[0]
-			if tracker[forward.y][forward.x][head.facing] == nil {
-				nextMove := &move{
-					p:      forward,
-					facing: head.facing,
-					score:  newScore,
-					prev:   []*move{head},
-				}
-				tracker[forward.y][forward.x][head.facing] = nextMove
+			if nextMove, isNew := mt.createOrUpdate(forward, head.facing, newScore, head); isNew {
 				heap.Push(&mq, nextMove)
-			} else if tracker[forward.y][forward.x][head.facing].score > newScore {
-				tracker[forward.y][forward.x][head.facing].score = newScore
-				tracker[forward.y][forward.x][head.facing].prev = []*move{head}
-			} else if tracker[forward.y][forward.x][head.facing].score == newScore {
-				tracker[forward.y][forward.x][head.facing].prev = append(tracker[forward.y][forward.x][head.facing].prev, head)
 			}
 		}
 
 		for i := 1; i <= 3; i++ {
 			if newFacing := (head.facing + i) % 4; head.p.neighbors[newFacing] != nil {
 				turnScore := head.score + (2-(i%2))*COSTS[1]
-				if tracker[head.p.y][head.p.x][newFacing] == nil {
-					nextMove := &move{
-						p:      head.p,
-						facing: newFacing,
-						score:  turnScore,
-						prev:   []*move{head},
-					}
-					tracker[head.p.y][head.p.x][newFacing] = nextMove
+				if nextMove, isNew := mt.createOrUpdate(head.p, newFacing, turnScore, head); isNew {
 					heap.Push(&mq, nextMove)
-				} else if tracker[head.p.y][head.p.x][head.facing].score > turnScore {
-					tracker[head.p.y][head.p.x][head.facing].score = turnScore
-				}
-
-				if forward := head.p.neighbors[head.facing]; forward != nil {
-					newScore := turnScore + COSTS[0]
-					if tracker[forward.y][forward.x][head.facing] == nil {
-						nextMove := &move{
-							p:      forward,
-							facing: head.facing,
-							score:  newScore,
-							prev:   []*move{head},
-						}
-						tracker[forward.y][forward.x][head.facing] = nextMove
-						heap.Push(&mq, nextMove)
-					} else if tracker[forward.y][forward.x][head.facing].score > newScore {
-						tracker[forward.y][forward.x][head.facing].score = newScore
-						tracker[forward.y][forward.x][head.facing].prev = []*move{head}
-					} else if tracker[forward.y][forward.x][head.facing].score == newScore {
-						tracker[forward.y][forward.x][head.facing].prev = append(tracker[forward.y][forward.x][head.facing].prev, head)
-					}
 				}
 			}
 		}
 	}
 
-	return len(usedTiles)
+	return len(tt)
 }
 
 func solve(input []string) (output string) {
